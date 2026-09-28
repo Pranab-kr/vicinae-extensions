@@ -27,16 +27,16 @@ Defined in `package.json` under `"preferences"`:
 | :--- | :--- | :--- | :--- | :--- |
 | `provider` | `dropdown` | Yes | `openrouter` | AI Provider (`openrouter`, `gemini`, `openai`, `ollama_custom`) |
 | `modelId` | `textfield` | Yes | `anthropic/claude-3.7-sonnet` | Exact Model ID to call |
-| `openrouterApiKey`| `password` | No | `""` | OpenRouter API Key (fallback: `OPENROUTER_API_KEY` env var) |
-| `geminiApiKey` | `password` | No | `""` | Google Gemini API Key (fallback: `GEMINI_API_KEY` env var) |
-| `openaiApiKey` | `password` | No | `""` | OpenAI API Key (fallback: `OPENAI_API_KEY` env var) |
+| `openrouterApiKey`| `password` | No | `""` | OpenRouter API Key |
+| `geminiApiKey` | `password` | No | `""` | Google Gemini API Key |
+| `openaiApiKey` | `password` | No | `""` | OpenAI API Key |
 | `customBaseUrl` | `textfield` | No | `http://localhost:11434/v1` | Custom Base URL for Ollama / LocalAI / OpenAI proxies |
 | `enableWebSearch` | `checkbox` | Yes | `true` | Enable real-time web search & fetch |
 | `systemPrompt` | `textfield` | No | `You are a helpful AI assistant with real-time web access. Format responses cleanly in markdown.` | Custom system prompt / instructions |
 
 > **Credential & Configuration Storage**:
 > - Saved locally by Vicinae in `~/.config/vicinae/settings.json` under `"providers"."ai-agent"."preferences"`.
-> - If an API key preference is left blank in the GUI, the extension automatically falls back to checking your environment variables (`OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `OPENAI_API_KEY`).
+> - **Explicit Entry Only**: API keys are strictly retrieved from what you enter in the extension preferences GUI (no reading from `process.env`).
 > - **Custom System Prompt**: Fully customizable in preferences to define the agent's persona, formatting rules, tone, and guidelines.
 
 ---
