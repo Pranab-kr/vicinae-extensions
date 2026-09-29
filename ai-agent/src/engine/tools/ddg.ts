@@ -43,9 +43,9 @@ export async function searchDuckDuckGo(
     // Match result links: class="result__a" href="..." and result__snippet
     const resultRegex =
       /<a[^>]+class="[^"]*result__a[^"]*"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?<a[^>]+class="[^"]*result__snippet[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
-    let match;
+    for (const match of html.matchAll(resultRegex)) {
+      if (results.length >= 5) break;
 
-    while ((match = resultRegex.exec(html)) !== null && results.length < 5) {
       let rawUrl = match[1];
       // DuckDuckGo redirects through /l/?uddg=<encoded_url>
       const uddgMatch = rawUrl.match(/uddg=([^&]+)/);
