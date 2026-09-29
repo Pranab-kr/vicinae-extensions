@@ -27,6 +27,7 @@ function ReplyModal(props: {
 }) {
   const { pop } = useNavigation();
   const [webSearch, setWebSearch] = useState(props.webSearchEnabled);
+  const isSubmittingRef = useRef(false);
 
   return (
     <Form
@@ -37,13 +38,17 @@ function ReplyModal(props: {
             title="Send Reply"
             icon={Icon.SpeechBubble}
             onSubmit={(values: Form.Values) => {
+              if (isSubmittingRef.current) return;
               const text = String(values.prompt || "").trim();
               if (text) {
+                isSubmittingRef.current = true;
                 pop();
-                props.onSubmit(
-                  text,
-                  typeof values.webSearch === "boolean" ? values.webSearch : webSearch
-                );
+                setTimeout(() => {
+                  props.onSubmit(
+                    text,
+                    typeof values.webSearch === "boolean" ? values.webSearch : webSearch
+                  );
+                }, 60);
               }
             }}
           />
@@ -102,6 +107,7 @@ export default function Command(props?: { conversation?: Conversation }) {
   const abortControllerRef = useRef<AbortController | null>(null);
   const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const bufferRef = useRef({ content: "", reasoning: "" });
+  const isNavigatingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -145,17 +151,15 @@ export default function Command(props?: { conversation?: Conversation }) {
       md += `### 🤖 Assistant\n`;
       if (streamingReasoning) {
         if (showThinking) {
-          md += `> 💭 **Thought Process**\n>\n> ${streamingReasoning.replace(/\n/g, "\n> ")}\n\n`;
+          md += `> 💭 **Thought Process**\n>\n> ${streamingReasoning.replace(/\n/g, "\n> ")}`;
         } else {
-          md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*\n\n`;
+          md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*`;
         }
-      }
-      md += `${streamingContent}\n\n`;
-      if (streamingCitations.length > 0) {
-        md += `**Sources:**\n`;
-        streamingCitations.forEach((c, idx) => {
-          md += `[${idx + 1}] [${c.title}](${c.url})\n`;
-        });
+        if (streamingContent) {
+          md += `\n\n${streamingContent}`;
+        }
+      } else if (streamingContent) {
+        md += streamingContent;
       }
     }
 
@@ -166,7 +170,6 @@ export default function Command(props?: { conversation?: Conversation }) {
     showThinking,
     streamingContent,
     streamingReasoning,
-    streamingCitations,
   ]);
 
   const executeChat = async (userPrompt: string, useWebSearch: boolean) => {
@@ -308,11 +311,27 @@ export default function Command(props?: { conversation?: Conversation }) {
       await saveConversation(finalConvo);
     } catch (err: any) {
       if (err.name !== "AbortError") {
+        const errorText = err.message || String(err);
         showToast({
           style: Toast.Style.Failure,
-          title: "Request Failed",
-          message: err.message,
+          title: errorText.includes("402") ? "OpenRouter: Insufficient Credits" : "Request Failed",
+          message: errorText.length > 80 ? errorText.slice(0, 80) + "..." : errorText,
         });
+
+        const errorMsg: Message = {
+          id: String(Date.now() + 1),
+          role: "assistant",
+          content: `⚠️ **Request Failed**\n\n${errorText}`,
+          timestamp: Date.now(),
+        };
+
+        const failedConvo: Conversation = {
+          ...updatedConvo,
+          messages: [...newMessages, errorMsg],
+          updatedAt: Date.now(),
+        };
+        setConversation(failedConvo);
+        await saveConversation(failedConvo);
       }
     } finally {
       if (throttleTimeoutRef.current) {
@@ -425,6 +444,38 @@ export default function Command(props?: { conversation?: Conversation }) {
     );
   }
 
+  const openReplyModal = () => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    push(
+      <ReplyModal
+        conversationTitle={conversation.title}
+        webSearchEnabled={webSearchEnabled}
+        onSubmit={(prompt, search) => {
+          setWebSearchEnabled(search);
+          executeChat(prompt, search);
+        }}
+      />
+    );
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 500);
+  };
+
+  const openRenameModal = () => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    push(
+      <RenameModal
+        initialTitle={conversation.title}
+        onRename={handleRename}
+      />
+    );
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 500);
+  };
+
   return (
     <Detail
       navigationTitle={conversation.title}
@@ -434,18 +485,7 @@ export default function Command(props?: { conversation?: Conversation }) {
           <Action
             title="Reply / Ask Follow-up"
             icon={Icon.SpeechBubble}
-            onAction={() =>
-              push(
-                <ReplyModal
-                  conversationTitle={conversation.title}
-                  webSearchEnabled={webSearchEnabled}
-                  onSubmit={(prompt, search) => {
-                    setWebSearchEnabled(search);
-                    executeChat(prompt, search);
-                  }}
-                />
-              )
-            }
+            onAction={openReplyModal}
           />
           <Action
             title={showThinking ? "Hide Thought Process" : "Show Thought Process"}
@@ -466,14 +506,7 @@ export default function Command(props?: { conversation?: Conversation }) {
             title="Rename Conversation"
             icon={Icon.Pencil}
             shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
-            onAction={() =>
-              push(
-                <RenameModal
-                  initialTitle={conversation.title}
-                  onRename={handleRename}
-                />
-              )
-            }
+            onAction={openRenameModal}
           />
           <Action
             title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}

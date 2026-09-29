@@ -131,6 +131,70 @@ describe("streamOpenRouter", () => {
     ).rejects.toThrow("OpenRouter Error (401): Unauthorized: Invalid API Key");
   });
 
+  it("handles HTTP 402 Insufficient Credits with clear actionable message", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 402,
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          error: {
+            message:
+              "This request requires more credits, or your account balance is too low.",
+            code: 402,
+          },
+        })
+      ),
+    });
+
+    const messages: Message[] = [
+      { id: "1", role: "user", content: "give me code", timestamp: Date.now() },
+    ];
+
+    await expect(
+      streamOpenRouter(
+        messages,
+        {
+          apiKey: "sk-or-test",
+          modelId: "openrouter/auto",
+          enableWebSearch: true,
+        },
+        () => {}
+      )
+    ).rejects.toThrow(
+      "OpenRouter Insufficient Credits (402): This request requires more credits, or your account balance is too low."
+    );
+  });
+
+  it("parses JSON error body cleanly on HTTP error response", async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 400,
+      text: vi.fn().mockResolvedValue(
+        JSON.stringify({
+          error: {
+            message: "Invalid model specified",
+          },
+        })
+      ),
+    });
+
+    const messages: Message[] = [
+      { id: "1", role: "user", content: "Hi", timestamp: Date.now() },
+    ];
+
+    await expect(
+      streamOpenRouter(
+        messages,
+        {
+          apiKey: "sk-or-test",
+          modelId: "invalid-model",
+          enableWebSearch: false,
+        },
+        () => {}
+      )
+    ).rejects.toThrow("OpenRouter Error (400): Invalid model specified");
+  });
+
   it("throws error when response body is missing", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,

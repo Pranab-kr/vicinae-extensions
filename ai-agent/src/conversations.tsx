@@ -9,7 +9,7 @@ import {
   showToast,
   useNavigation,
 } from "@vicinae/api";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import AskCommand from "./ask.js";
 import {
   clearConversations,
@@ -24,6 +24,30 @@ export default function ConversationsCommand() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { push } = useNavigation();
+  const isNavigatingRef = useRef(false);
+
+  const navigateToResume = (c: Conversation) => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    push(<AskCommand conversation={c} />);
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 600);
+  };
+
+  const navigateToRename = (c: Conversation) => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    push(
+      <RenameModal
+        initialTitle={c.title}
+        onRename={(newTitle) => handleRename(c, newTitle)}
+      />
+    );
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 600);
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -117,20 +141,13 @@ export default function ConversationsCommand() {
                 <Action
                   title="Resume Chat"
                   icon={Icon.ArrowRight}
-                  onAction={() => push(<AskCommand conversation={c} />)}
+                  onAction={() => navigateToResume(c)}
                 />
                 <Action
                   title="Rename Conversation"
                   icon={Icon.Pencil}
                   shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
-                  onAction={() =>
-                    push(
-                      <RenameModal
-                        initialTitle={c.title}
-                        onRename={(newTitle) => handleRename(c, newTitle)}
-                      />
-                    )
-                  }
+                  onAction={() => navigateToRename(c)}
                 />
                 <Action
                   title="Delete Conversation"

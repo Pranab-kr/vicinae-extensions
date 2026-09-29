@@ -1,5 +1,5 @@
 import { Action, ActionPanel, Form, Icon, useNavigation } from "@vicinae/api";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export function RenameModal(props: {
   initialTitle: string;
@@ -7,12 +7,17 @@ export function RenameModal(props: {
 }) {
   const { pop } = useNavigation();
   const [title, setTitle] = useState(props.initialTitle);
+  const isSubmittingRef = useRef(false);
 
   const handleSubmit = async (values: Form.Values) => {
+    if (isSubmittingRef.current) return;
     const trimmed = String(values.title ?? title).trim();
     if (!trimmed) return;
+    isSubmittingRef.current = true;
     pop();
-    await props.onRename(trimmed);
+    setTimeout(async () => {
+      await props.onRename(trimmed);
+    }, 60);
   };
 
   return (

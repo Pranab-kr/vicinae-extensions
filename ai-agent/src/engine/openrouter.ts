@@ -52,8 +52,26 @@ export async function streamOpenRouter(
   });
 
   if (!resp.ok) {
-    const errorText = await resp.text();
-    throw new Error(`OpenRouter Error (${resp.status}): ${errorText}`);
+    const errorRaw = await resp.text().catch(() => "");
+    let errorMessage = errorRaw;
+    try {
+      const parsed = JSON.parse(errorRaw);
+      if (parsed?.error?.message) {
+        errorMessage = parsed.error.message;
+      }
+    } catch {
+      // Keep raw text if not JSON
+    }
+
+    if (resp.status === 402) {
+      throw new Error(
+        `OpenRouter Insufficient Credits (402): ${errorMessage}. ` +
+          `Coding tasks or models like 'openrouter/auto' route to paid models that require account credits. ` +
+          `Please add credits to your OpenRouter account, or switch to a free model (e.g. meta-llama/llama-3.3-70b-instruct:free or deepseek/deepseek-r1:free).`
+      );
+    }
+
+    throw new Error(`OpenRouter Error (${resp.status}): ${errorMessage}`);
   }
 
   if (!resp.body) {
