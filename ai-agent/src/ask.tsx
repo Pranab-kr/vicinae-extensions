@@ -307,7 +307,14 @@ export default function Command(props?: { conversation?: Conversation }) {
         updatedAt: Date.now(),
       };
 
+      // Synchronously commit final conversation and clear streaming state in one batch
+      // This prevents double-rendering the assistant message and avoids resetting auto-scroll to the top!
+      setIsLoading(false);
+      setStreamingContent("");
+      setStreamingReasoning("");
+      setStreamingCitations([]);
       setConversation(finalConvo);
+
       await saveConversation(finalConvo);
     } catch (err: any) {
       if (err.name !== "AbortError") {
@@ -330,7 +337,13 @@ export default function Command(props?: { conversation?: Conversation }) {
           messages: [...newMessages, errorMsg],
           updatedAt: Date.now(),
         };
+
+        setIsLoading(false);
+        setStreamingContent("");
+        setStreamingReasoning("");
+        setStreamingCitations([]);
         setConversation(failedConvo);
+
         await saveConversation(failedConvo);
       }
     } finally {
