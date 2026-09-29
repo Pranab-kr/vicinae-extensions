@@ -49,12 +49,80 @@ describe("cloudflare engine", () => {
       expect(meta.asn).toBe(13335);
     });
 
-    it("throws error when metadata request fails", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
-        ok: false,
-        status: 500,
-        statusText: "Internal Server Error"
+    it("sends Referer and Origin headers in metadata discovery request", async () => {
+      const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ clientIp: "1.1.1.1" })
       } as any);
+
+      await discoverMetadata();
+      expect(fetchSpy).toHaveBeenCalledWith(
+        expect.stringContaining("/meta"),
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            Referer: "https://speed.cloudflare.com/",
+            Origin: "https://speed.cloudflare.com"
+          })
+        })
+      );
+    });
+
+    it("handles object colo structure from Cloudflare /meta correctly", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          clientIp: "1.2.3.4",
+          colo: { iata: "BOM", city: "Mumbai" }
+        })
+      } as any);
+
+      const meta = await discoverMetadata();
+      expect(meta.colo).toBe("BOM (Mumbai)");
+    });
+
+    it("falls back to DOWN_URL headers when /meta returns 403 Forbidden", async () => {
+      const headerMap = new Map<string, string>([
+        ["cf-meta-ip", "202.142.73.155"],
+        ["colo", "BOM"],
+        ["asn", "132115"],
+        ["city", "Howrah"],
+        ["country", "IN"]
+      ]);
+
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          statusText: "Forbidden"
+        } as any)
+        .mockResolvedValueOnce({
+          ok: true,
+          headers: {
+            get: (k: string) => headerMap.get(k.toLowerCase()) ?? null
+          },
+          arrayBuffer: async () => new ArrayBuffer(0)
+        } as any);
+
+      const meta = await discoverMetadata();
+      expect(meta.ip).toBe("202.142.73.155");
+      expect(meta.colo).toBe("BOM");
+      expect(meta.asn).toBe(132115);
+      expect(meta.city).toBe("Howrah");
+      expect(meta.country).toBe("IN");
+    });
+
+    it("throws error when both metadata request and fallback probe fail", async () => {
+      vi.spyOn(globalThis, "fetch")
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error"
+        } as any)
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 500,
+          statusText: "Internal Server Error"
+        } as any);
 
       await expect(discoverMetadata()).rejects.toThrow("Failed to discover metadata");
     });
@@ -281,7 +349,7 @@ describe("cloudflare engine", () => {
     });
 
     it("handles unexpected error during runSpeedtest and updates state to error", async () => {
-      vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("Network connection lost"));
+      vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network connection lost"));
 
       const states: SpeedtestState[] = [];
       await expect(

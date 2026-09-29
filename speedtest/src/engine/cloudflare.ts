@@ -15,25 +15,74 @@ export const DEFAULT_LATENCY_PROBES = 8;
 export const DEFAULT_DOWNLOAD_BYTES = 25_000_000;
 export const DEFAULT_UPLOAD_CHUNKS = [1_000_000, 2_500_000, 5_000_000, 10_000_000];
 
+export const DEFAULT_HEADERS: Record<string, string> = {
+  "Cache-Control": "no-cache",
+  "Referer": "https://speed.cloudflare.com/",
+  "Origin": "https://speed.cloudflare.com",
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+};
+
 export async function discoverMetadata(signal?: AbortSignal): Promise<ServerMetadata> {
   signal?.throwIfAborted();
-  const response = await fetch(META_URL, {
-    signal,
-    headers: { "Cache-Control": "no-cache" }
-  });
+  try {
+    const response = await fetch(META_URL, {
+      signal,
+      headers: DEFAULT_HEADERS
+    });
 
-  if (!response.ok) {
-    throw new Error(`Failed to discover metadata: ${response.status} ${response.statusText}`);
+    if (response.ok) {
+      const data = (await response.json()) as any;
+      let colo: string | undefined;
+      if (typeof data.colo === "object" && data.colo !== null) {
+        if (data.colo.iata) {
+          colo = data.colo.city ? `${data.colo.iata} (${data.colo.city})` : data.colo.iata;
+        } else {
+          colo = data.colo.city || undefined;
+        }
+      } else if (typeof data.colo === "string") {
+        colo = data.colo;
+      }
+
+      return {
+        ip: data.clientIp || data.ip || "",
+        asn: data.asn ? Number(data.asn) : undefined,
+        isp: data.asOrganization || data.isp,
+        city: data.city,
+        country: data.country,
+        colo
+      };
+    }
+  } catch (err) {
+    if (signal?.aborted) throw err;
   }
 
-  const data = (await response.json()) as any;
+  // Fallback: discover via headers from DOWN_URL probe
+  signal?.throwIfAborted();
+  const fallbackRes = await fetch(`${DOWN_URL}?bytes=0`, {
+    signal,
+    headers: DEFAULT_HEADERS
+  });
+
+  if (!fallbackRes.ok) {
+    throw new Error(`Failed to discover metadata: ${fallbackRes.status} ${fallbackRes.statusText}`);
+  }
+
+  await fallbackRes.arrayBuffer();
+
+  const ip = fallbackRes.headers.get("cf-meta-ip") || "";
+  const asnStr = fallbackRes.headers.get("asn");
+  const asn = asnStr ? Number.parseInt(asnStr, 10) : undefined;
+  const city = fallbackRes.headers.get("city") || undefined;
+  const country = fallbackRes.headers.get("country") || undefined;
+  const colo = fallbackRes.headers.get("colo") || undefined;
+
   return {
-    ip: data.clientIp || data.ip || "",
-    asn: data.asn,
-    isp: data.asOrganization || data.isp,
-    city: data.city,
-    country: data.country,
-    colo: data.colo
+    ip,
+    asn,
+    city,
+    country,
+    colo
   };
 }
 
@@ -50,7 +99,7 @@ export async function measureLatency(
     const start = performance.now();
     const res = await fetch(`${DOWN_URL}?bytes=0`, {
       signal,
-      headers: { "Cache-Control": "no-cache" }
+      headers: DEFAULT_HEADERS
     });
 
     if (!res.ok) {
@@ -85,7 +134,7 @@ export async function measureDownload(
   const startTime = performance.now();
   const res = await fetch(`${DOWN_URL}?bytes=${bytes}`, {
     signal,
-    headers: { "Cache-Control": "no-cache" }
+    headers: DEFAULT_HEADERS
   });
 
   if (!res.ok) {
@@ -179,6 +228,7 @@ export async function measureUpload(
 
     const res = await fetch(UP_URL, {
       method: "POST",
+      headers: DEFAULT_HEADERS,
       body: chunk,
       signal
     });
