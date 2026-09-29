@@ -1,0 +1,112 @@
+{
+  "name": "ai-agent",
+  "title": "AI Agent",
+  "description": "Chat with AI agents powered by OpenRouter, Gemini, and OpenAI with real-time web search",
+  "icon": "icon.png",
+  "author": "pranab",
+  "categories": ["Productivity", "Developer Tools"],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "ask",
+      "title": "Chat with AI Agent",
+      "subtitle": "AI Agent",
+      "description": "Ask questions and chat with real-time web search",
+      "mode": "view",
+      "icon": "icon.png"
+    },
+    {
+      "name": "conversations",
+      "title": "AI Agent Conversations",
+      "subtitle": "AI Agent",
+      "description": "Browse and resume previous chat conversations",
+      "mode": "view",
+      "icon": "icon.png"
+    }
+  ],
+  "preferences": [
+    {
+      "name": "provider",
+      "title": "AI Provider",
+      "description": "Select the AI backend to use",
+      "type": "dropdown",
+      "required": true,
+      "default": "openrouter",
+      "data": [
+        { "title": "OpenRouter", "value": "openrouter" },
+        { "title": "Google Gemini", "value": "gemini" },
+        { "title": "OpenAI", "value": "openai" },
+        { "title": "Ollama / Custom Endpoint", "value": "ollama_custom" }
+      ]
+    },
+    {
+      "name": "modelId",
+      "title": "Model ID",
+      "description": "Enter the exact model identifier to call",
+      "type": "textfield",
+      "required": true,
+      "default": "anthropic/claude-3.7-sonnet"
+    },
+    {
+      "name": "openrouterApiKey",
+      "title": "OpenRouter API Key",
+      "description": "Your OpenRouter API Key (sk-or-v1-...)",
+      "type": "password",
+      "required": false
+    },
+    {
+      "name": "geminiApiKey",
+      "title": "Google Gemini API Key",
+      "description": "Your Google AI Studio API Key (AIzaSy...)",
+      "type": "password",
+      "required": false
+    },
+    {
+      "name": "openaiApiKey",
+      "title": "OpenAI API Key",
+      "description": "Your OpenAI API Key (sk-proj-...)",
+      "type": "password",
+      "required": false
+    },
+    {
+      "name": "customBaseUrl",
+      "title": "Custom Base URL",
+      "description": "Base URL for Ollama / LocalAI / OpenAI-compatible endpoint",
+      "type": "textfield",
+      "required": false,
+      "default": "http://localhost:11434/v1"
+    },
+    {
+      "name": "enableWebSearch",
+      "title": "Web Search & Fetch",
+      "label": "Enable real-time web search and page reading",
+      "description": "Enables live web browsing for up-to-date information",
+      "type": "checkbox",
+      "required": true,
+      "default": true
+    },
+    {
+      "name": "systemPrompt",
+      "title": "System Prompt",
+      "description": "Instructions defining the agent's behavior and tone",
+      "type": "textfield",
+      "required": false,
+      "default": "You are a helpful AI assistant with real-time web access. Format responses cleanly in markdown."
+    }
+  ],
+  "dependencies": {
+    "@vicinae/api": "^0.20.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/react": "19.0.10",
+    "react": "19.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "scripts": {
+    "build": "vici build",
+    "dev": "vici develop",
+    "test": "vitest run"
+  }
+}
