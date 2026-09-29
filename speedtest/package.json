@@ -1,0 +1,38 @@
+{
+  "$schema": "https://raw.githubusercontent.com/vicinaehq/vicinae/refs/heads/main/extra/schemas/extension.json",
+  "name": "speedtest",
+  "title": "Speedtest",
+  "description": "Real-time network speed and latency test powered by Cloudflare Edge",
+  "icon": "icon.png",
+  "author": "pranab",
+  "categories": [
+    "System",
+    "Developer Tools"
+  ],
+  "license": "MIT",
+  "commands": [
+    {
+      "name": "index",
+      "title": "Speedtest",
+      "subtitle": "Network Speed Test",
+      "description": "Test internet speed and network latency in real time",
+      "mode": "view",
+      "icon": "icon.png"
+    }
+  ],
+  "dependencies": {
+    "@vicinae/api": "^0.20.15"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "@types/react": "19.0.10",
+    "react": "19.0.0",
+    "typescript": "^5.7.3",
+    "vitest": "^3.0.5"
+  },
+  "scripts": {
+    "build": "vici build -o dist",
+    "dev": "vici develop",
+    "test": "vitest run"
+  }
+}

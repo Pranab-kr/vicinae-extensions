@@ -1,10 +1,12 @@
 # Dependencies
 node_modules/
 ai-agent/node_modules/
+speedtest/node_modules/
 
 # Production build outputs
 dist/
 ai-agent/dist/
+speedtest/dist/
 
 # Superpowers and local session data
 .superpowers/
