@@ -102,7 +102,7 @@ describe("streamGemini", () => {
     ]);
   });
 
-  it("throws error when API key is missing or empty", async () => {
+  it("throws error when API key is missing or empty or whitespace-only", async () => {
     const messages: Message[] = [
       { id: "1", role: "user", content: "Hello", timestamp: Date.now() },
     ];
@@ -118,6 +118,52 @@ describe("streamGemini", () => {
         () => {}
       )
     ).rejects.toThrow("Gemini API key is not configured. Please open extension preferences.");
+
+    await expect(
+      streamGemini(
+        messages,
+        {
+          apiKey: "   ",
+          modelId: "gemini-2.0-flash",
+          enableWebSearch: false,
+        },
+        () => {}
+      )
+    ).rejects.toThrow("Gemini API key is not configured. Please open extension preferences.");
+  });
+
+  it("throws error on mid-stream error chunk", async () => {
+    const sseResponse = [
+      'data: {"candidates": [{"content": {"parts": [{"text": "Start"}]}}]}\n\n',
+      'data: {"error": {"message": "Resource exhausted", "code": 429}}\n\n',
+    ].join("");
+
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: createSSEStream(sseResponse),
+    });
+
+    const events: StreamEvent[] = [];
+    const messages: Message[] = [
+      { id: "1", role: "user", content: "Hello", timestamp: Date.now() },
+    ];
+
+    await expect(
+      streamGemini(
+        messages,
+        {
+          apiKey: "AIzaSyTestKey",
+          modelId: "gemini-2.0-flash",
+          enableWebSearch: false,
+        },
+        (ev) => events.push(ev)
+      )
+    ).rejects.toThrow("Gemini Stream Error: Resource exhausted");
+
+    expect(events).toContainEqual({
+      type: "token",
+      text: "Start",
+    });
   });
 
   it("throws error on HTTP error response", async () => {

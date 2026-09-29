@@ -14,7 +14,7 @@ export async function streamOpenRouter(
   onEvent: (ev: StreamEvent) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  if (!config.apiKey) {
+  if (!config.apiKey?.trim()) {
     throw new Error(
       "OpenRouter API key is not configured. Please open extension preferences."
     );

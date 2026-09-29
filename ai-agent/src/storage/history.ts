@@ -13,7 +13,8 @@ export async function loadConversations(): Promise<Conversation[]> {
   try {
     const raw = await LocalStorage.getItem<string>(STORAGE_KEY);
     if (!raw) return [];
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
   } catch {
     return [];
   }
@@ -23,10 +24,9 @@ export async function saveConversation(convo: Conversation): Promise<void> {
   const list = await loadConversations();
   const existingIdx = list.findIndex((c) => c.id === convo.id);
   if (existingIdx >= 0) {
-    list[existingIdx] = convo;
-  } else {
-    list.unshift(convo);
+    list.splice(existingIdx, 1);
   }
+  list.unshift(convo);
 
   // Keep top 50 conversations
   const capped = list.slice(0, 50);

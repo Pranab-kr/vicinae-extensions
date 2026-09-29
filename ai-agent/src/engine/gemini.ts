@@ -14,7 +14,7 @@ export async function streamGemini(
   onEvent: (ev: StreamEvent) => void,
   signal?: AbortSignal
 ): Promise<void> {
-  if (!config.apiKey) {
+  if (!config.apiKey?.trim()) {
     throw new Error("Gemini API key is not configured. Please open extension preferences.");
   }
 
@@ -61,6 +61,10 @@ export async function streamGemini(
   const seenUrls = new Set<string>();
 
   for await (const chunk of parseSSEStream(resp.body, signal)) {
+    if (chunk.error) {
+      throw new Error(`Gemini Stream Error: ${chunk.error.message || JSON.stringify(chunk.error)}`);
+    }
+
     const candidate = chunk.candidates?.[0];
     if (!candidate) continue;
 

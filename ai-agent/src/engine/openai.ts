@@ -63,6 +63,7 @@ export async function streamOpenAI(
   let turn = 0;
   const maxTurns = 4;
   let useTools = config.enableWebSearch;
+  const seenUrls = new Set<string>();
 
   while (turn < maxTurns) {
     turn++;
@@ -177,7 +178,10 @@ export async function streamOpenAI(
     for (const tool of executedTools) {
       let args: any = {};
       try {
-        args = JSON.parse(tool.arguments);
+        const parsed = JSON.parse(tool.arguments) || {};
+        if (typeof parsed === "object" && !Array.isArray(parsed)) {
+          args = parsed;
+        }
       } catch {
         // Bad JSON arguments from model
       }
@@ -189,7 +193,10 @@ export async function streamOpenAI(
           const results = await searchDuckDuckGo(args.query || "", signal);
           toolResult = JSON.stringify(results);
           for (const r of results) {
-            onEvent({ type: "citation", citation: { title: r.title, url: r.url } });
+            if (r.url && !seenUrls.has(r.url)) {
+              seenUrls.add(r.url);
+              onEvent({ type: "citation", citation: { title: r.title, url: r.url } });
+            }
           }
         } catch (err: any) {
           toolResult = `Search failed: ${err.message}`;
@@ -199,7 +206,10 @@ export async function streamOpenAI(
         try {
           const page = await safeFetchWebPage(args.url || "", signal);
           toolResult = JSON.stringify(page);
-          onEvent({ type: "citation", citation: { title: page.title, url: args.url || "" } });
+          if (args.url && !seenUrls.has(args.url)) {
+            seenUrls.add(args.url);
+            onEvent({ type: "citation", citation: { title: page.title, url: args.url } });
+          }
         } catch (err: any) {
           toolResult = `Fetch failed: ${err.message}`;
         }

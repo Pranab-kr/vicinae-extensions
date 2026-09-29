@@ -112,6 +112,13 @@ describe("history storage layer", () => {
       expect(list).toEqual([]);
     });
 
+    it("returns empty array gracefully when stored JSON is not an array", async () => {
+      mockStorage.set("vicinae_ai_agent_conversations_v1", JSON.stringify({ notAnArray: true }));
+
+      const list = await loadConversations();
+      expect(list).toEqual([]);
+    });
+
     it("returns empty array gracefully when LocalStorage throws", async () => {
       vi.mocked(LocalStorage.getItem).mockRejectedValueOnce(new Error("Storage I/O failure"));
 
@@ -139,7 +146,7 @@ describe("history storage layer", () => {
       expect(stored[1].id).toBe("c-1");
     });
 
-    it("updates existing conversation in place (upsert behavior)", async () => {
+    it("moves updated existing conversation to the top (MRU order)", async () => {
       const convo1 = createMockConversation("c-1", "Initial title");
       const convo2 = createMockConversation("c-2", "Other convo");
       mockStorage.set(
@@ -147,19 +154,19 @@ describe("history storage layer", () => {
         JSON.stringify([convo1, convo2])
       );
 
-      const updated1: Conversation = {
-        ...convo1,
+      const updated2: Conversation = {
+        ...convo2,
         title: "Updated title",
         updatedAt: Date.now() + 5000,
       };
 
-      await saveConversation(updated1);
+      await saveConversation(updated2);
 
       const stored = JSON.parse(mockStorage.get("vicinae_ai_agent_conversations_v1")!);
       expect(stored).toHaveLength(2);
-      expect(stored[0].id).toBe("c-1");
+      expect(stored[0].id).toBe("c-2");
       expect(stored[0].title).toBe("Updated title");
-      expect(stored[1].id).toBe("c-2");
+      expect(stored[1].id).toBe("c-1");
     });
 
     it("caps conversation list at 50 items, keeping the most recent", async () => {

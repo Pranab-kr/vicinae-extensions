@@ -73,7 +73,7 @@ describe("streamOpenRouter", () => {
     ]);
   });
 
-  it("throws error when API key is missing or empty", async () => {
+  it("throws error when API key is missing or empty or whitespace-only", async () => {
     const messages: Message[] = [
       { id: "1", role: "user", content: "Hello", timestamp: Date.now() },
     ];
@@ -83,6 +83,20 @@ describe("streamOpenRouter", () => {
         messages,
         {
           apiKey: "",
+          modelId: "test-model",
+          enableWebSearch: false,
+        },
+        () => {}
+      )
+    ).rejects.toThrow(
+      "OpenRouter API key is not configured. Please open extension preferences."
+    );
+
+    await expect(
+      streamOpenRouter(
+        messages,
+        {
+          apiKey: "   ",
           modelId: "test-model",
           enableWebSearch: false,
         },

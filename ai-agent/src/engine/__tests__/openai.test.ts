@@ -713,4 +713,101 @@ describe("streamOpenAI", () => {
       { type: "done" },
     ]);
   });
+
+  it("deduplicates citations across turns and between search and fetch tools", async () => {
+    // Turn 1 returns search_web tool call
+    const toolCallStream1 = [
+      'data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_1", "function": {"name": "search_web", "arguments": "{\\"query\\": \\"test\\"}"}}]}}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join("");
+
+    // Turn 2 returns fetch_web_page tool call for same URL
+    const toolCallStream2 = [
+      'data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_2", "function": {"name": "fetch_web_page", "arguments": "{\\"url\\": \\"https://example.com/page\\"}"}}]}}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join("");
+
+    // Turn 3 returns final answer
+    const answerStream = [
+      'data: {"choices": [{"delta": {"content": "All done."}}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join("");
+
+    let requestCount = 0;
+    global.fetch = vi.fn().mockImplementation(() => {
+      requestCount++;
+      const text =
+        requestCount === 1
+          ? toolCallStream1
+          : requestCount === 2
+          ? toolCallStream2
+          : answerStream;
+      return Promise.resolve({
+        ok: true,
+        body: createSSEStream(text),
+      });
+    });
+
+    vi.mocked(searchDuckDuckGo).mockResolvedValue([
+      { title: "Example Page", url: "https://example.com/page", snippet: "Snippet" },
+      { title: "Example Page Duplicate", url: "https://example.com/page", snippet: "Snippet 2" },
+    ]);
+    vi.mocked(safeFetchWebPage).mockResolvedValue({
+      title: "Example Page",
+      content: "Fetched content",
+    });
+
+    const events: StreamEvent[] = [];
+    await streamOpenAI(
+      [{ id: "1", role: "user", content: "Check page", timestamp: Date.now() }],
+      {
+        apiKey: "sk-test",
+        modelId: "gpt-4o",
+        enableWebSearch: true,
+      },
+      (ev) => events.push(ev)
+    );
+
+    const citations = events.filter((e) => e.type === "citation");
+    expect(citations).toHaveLength(1);
+    expect(citations[0]).toEqual({
+      type: "citation",
+      citation: { title: "Example Page", url: "https://example.com/page" },
+    });
+  });
+
+  it("guards against null or non-object tool arguments without throwing", async () => {
+    const toolCallStream = [
+      'data: {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_null_1", "function": {"name": "search_web", "arguments": "null"}}]}}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join("");
+
+    const answerStream = [
+      'data: {"choices": [{"delta": {"content": "Handled null args."}}]}\n\n',
+      "data: [DONE]\n\n",
+    ].join("");
+
+    let requestCount = 0;
+    global.fetch = vi.fn().mockImplementation(() => {
+      requestCount++;
+      return Promise.resolve({
+        ok: true,
+        body: createSSEStream(requestCount === 1 ? toolCallStream : answerStream),
+      });
+    });
+
+    const events: StreamEvent[] = [];
+    await streamOpenAI(
+      [{ id: "1", role: "user", content: "Query", timestamp: Date.now() }],
+      {
+        apiKey: "sk-test",
+        modelId: "gpt-4o",
+        enableWebSearch: true,
+      },
+      (ev) => events.push(ev)
+    );
+
+    expect(events).toContainEqual({ type: "token", text: "Handled null args." });
+    expect(events).toContainEqual({ type: "done" });
+  });
 });

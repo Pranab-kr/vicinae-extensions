@@ -31,9 +31,17 @@ export default function ConversationsCommand() {
   }, []);
 
   const handleDelete = async (convo: Conversation) => {
-    await deleteConversation(convo.id);
-    setConversations((prev) => prev.filter((c) => c.id !== convo.id));
-    showToast({ style: Toast.Style.Success, title: "Conversation deleted" });
+    try {
+      await deleteConversation(convo.id);
+      setConversations((prev) => prev.filter((c) => c.id !== convo.id));
+      showToast({ style: Toast.Style.Success, title: "Conversation deleted" });
+    } catch (err: any) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Failed to delete conversation",
+        message: err?.message,
+      });
+    }
   };
 
   const handleClearAll = async () => {
@@ -44,9 +52,17 @@ export default function ConversationsCommand() {
         primaryAction: { title: "Delete All", style: Alert.ActionStyle.Destructive },
       })
     ) {
-      await clearConversations();
-      setConversations([]);
-      showToast({ style: Toast.Style.Success, title: "History cleared" });
+      try {
+        await clearConversations();
+        setConversations([]);
+        showToast({ style: Toast.Style.Success, title: "History cleared" });
+      } catch (err: any) {
+        showToast({
+          style: Toast.Style.Failure,
+          title: "Failed to clear history",
+          message: err?.message,
+        });
+      }
     }
   };
 

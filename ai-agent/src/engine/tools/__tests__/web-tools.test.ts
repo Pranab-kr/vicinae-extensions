@@ -338,6 +338,28 @@ describe("searchDuckDuckGo", () => {
     });
   });
 
+  it("prevents double unescaping by replacing &amp; last", async () => {
+    const mockHtml = `
+      <div class="result results_links">
+        <h2 class="result__title">
+          <a class="result__a" href="https://example.com/test">&amp;lt;div&amp;gt; &amp;amp; &amp;quot;quotes&amp;quot;</a>
+        </h2>
+        <a class="result__snippet">Snippet with &amp;lt;tag&amp;gt;</a>
+      </div>
+    `;
+
+    globalThis.fetch = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      text: async () => mockHtml,
+    });
+
+    const results = await searchDuckDuckGo("test entities");
+    expect(results).toHaveLength(1);
+    expect(results[0].title).toBe('&lt;div&gt; &amp; &quot;quotes&quot;');
+    expect(results[0].snippet).toBe("Snippet with &lt;tag&gt;");
+  });
+
   it("throws on DuckDuckGo HTTP error", async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
       ok: false,
