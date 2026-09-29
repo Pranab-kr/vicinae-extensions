@@ -2,8 +2,6 @@
 
 A powerful, native AI assistant extension for [Vicinae](https://vicinae.com) launcher, supporting multiple AI backends, real-time web search with SSRF-safe page fetching, streaming reasoning thoughts, and persistent conversation history.
 
-![Vicinae AI Agent](ai-agent/assets/icon.png)
-
 ## Features
 
 - 🚀 **Multi-Provider Support**: Seamlessly chat with:
