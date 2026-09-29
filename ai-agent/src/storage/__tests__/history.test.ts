@@ -5,6 +5,7 @@ import {
   saveConversation,
   deleteConversation,
   clearConversations,
+  renameConversation,
 } from "../history.js";
 import { Conversation } from "../../types.js";
 import { LocalStorage } from "@vicinae/api";
@@ -228,6 +229,49 @@ describe("history storage layer", () => {
 
       expect(LocalStorage.removeItem).toHaveBeenCalledWith("vicinae_ai_agent_conversations_v1");
       expect(mockStorage.has("vicinae_ai_agent_conversations_v1")).toBe(false);
+    });
+  });
+
+  describe("renameConversation", () => {
+    it("updates the title of existing conversation and returns updated object", async () => {
+      const convo = createMockConversation("c-1", "Old Title");
+      mockStorage.set("vicinae_ai_agent_conversations_v1", JSON.stringify([convo]));
+
+      const renamed = await renameConversation("c-1", "New Brand Title");
+
+      expect(renamed).not.toBeNull();
+      expect(renamed?.title).toBe("New Brand Title");
+      expect(renamed?.id).toBe("c-1");
+
+      const stored = JSON.parse(mockStorage.get("vicinae_ai_agent_conversations_v1")!);
+      expect(stored[0].title).toBe("New Brand Title");
+    });
+
+    it("trims whitespace from new title", async () => {
+      const convo = createMockConversation("c-1", "Old Title");
+      mockStorage.set("vicinae_ai_agent_conversations_v1", JSON.stringify([convo]));
+
+      const renamed = await renameConversation("c-1", "   Trimmed Title   ");
+      expect(renamed?.title).toBe("Trimmed Title");
+    });
+
+    it("returns null and does not update when title is empty", async () => {
+      const convo = createMockConversation("c-1", "Old Title");
+      mockStorage.set("vicinae_ai_agent_conversations_v1", JSON.stringify([convo]));
+
+      const renamed = await renameConversation("c-1", "    ");
+      expect(renamed).toBeNull();
+
+      const stored = JSON.parse(mockStorage.get("vicinae_ai_agent_conversations_v1")!);
+      expect(stored[0].title).toBe("Old Title");
+    });
+
+    it("returns null if conversation id is not found", async () => {
+      const convo = createMockConversation("c-1", "Old Title");
+      mockStorage.set("vicinae_ai_agent_conversations_v1", JSON.stringify([convo]));
+
+      const renamed = await renameConversation("c-unknown", "New Title");
+      expect(renamed).toBeNull();
     });
   });
 });

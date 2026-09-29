@@ -1,23 +1,77 @@
 import {
   Action,
   ActionPanel,
+  Detail,
+  Form,
   Icon,
-  List,
   Toast,
   getPreferenceValues,
   openExtensionPreferences,
   showToast,
+  useNavigation,
 } from "@vicinae/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { dispatchAgentChat } from "./engine/client.js";
-import { generateConversationTitle, saveConversation } from "./storage/history.js";
+import { RenameModal } from "./rename-modal.js";
+import {
+  generateConversationTitle,
+  renameConversation,
+  saveConversation,
+} from "./storage/history.js";
 import { Citation, Conversation, Message, Preferences } from "./types.js";
+
+function ReplyModal(props: {
+  conversationTitle: string;
+  webSearchEnabled: boolean;
+  onSubmit: (prompt: string, webSearch: boolean) => void;
+}) {
+  const { pop } = useNavigation();
+  const [webSearch, setWebSearch] = useState(props.webSearchEnabled);
+
+  return (
+    <Form
+      navigationTitle={`Reply: ${props.conversationTitle}`}
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Send Reply"
+            icon={Icon.SpeechBubble}
+            onSubmit={(values: Form.Values) => {
+              const text = String(values.prompt || "").trim();
+              if (text) {
+                pop();
+                props.onSubmit(
+                  text,
+                  typeof values.webSearch === "boolean" ? values.webSearch : webSearch
+                );
+              }
+            }}
+          />
+        </ActionPanel>
+      }
+    >
+      <Form.TextArea
+        id="prompt"
+        title="Follow-up"
+        placeholder="Type follow-up question or instructions..."
+        autoFocus
+      />
+      <Form.Checkbox
+        id="webSearch"
+        title="Web Search"
+        label="Enable real-time web search"
+        defaultValue={props.webSearchEnabled}
+        onChange={setWebSearch}
+      />
+    </Form>
+  );
+}
 
 export default function Command(props?: { conversation?: Conversation }) {
   const prefs = getPreferenceValues<Preferences>();
-  const [prompt, setPrompt] = useState("");
+  const { push } = useNavigation();
   const [isLoading, setIsLoading] = useState(false);
-  const [statusMessage, setStatusMessage] = useState("");
+  const [showThinking, setShowThinking] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(
     props?.conversation ? props.conversation.enableWebSearch : prefs.enableWebSearch
   );
@@ -35,6 +89,10 @@ export default function Command(props?: { conversation?: Conversation }) {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
+  });
+
+  const [viewMode, setViewMode] = useState<"form" | "chat">(() => {
+    return props?.conversation && props.conversation.messages.length > 0 ? "chat" : "form";
   });
 
   const [streamingContent, setStreamingContent] = useState("");
@@ -57,20 +115,7 @@ export default function Command(props?: { conversation?: Conversation }) {
   }, []);
 
   const buildMarkdown = useCallback(() => {
-    let md = "";
-    if (conversation.messages.length === 0 && !isLoading) {
-      md += `# AI Agent Chat\n\n`;
-      md += `* **Provider:** \`${conversation.provider}\`\n`;
-      md += `* **Model:** \`${conversation.modelId}\`\n`;
-      md += `* **Web Search:** ${webSearchEnabled ? "🟢 Enabled" : "⚪ Disabled"}\n\n`;
-      md += `Type your prompt into the search bar above and press **Enter** to chat.\n\n`;
-      md += `### Keyboard Shortcuts\n`;
-      md += `* **Enter:** Send prompt / follow-up\n`;
-      md += `* **Ctrl+Shift+W:** Toggle web search on/off\n`;
-      md += `* **Ctrl+Shift+N:** New conversation\n`;
-      md += `* **Ctrl+Shift+C:** Copy response\n`;
-      return md;
-    }
+    let md = `# ${conversation.title}\n\n`;
 
     for (const msg of conversation.messages) {
       if (msg.role === "user") {
@@ -78,7 +123,11 @@ export default function Command(props?: { conversation?: Conversation }) {
       } else {
         md += `### 🤖 Assistant\n`;
         if (msg.reasoning) {
-          md += `<details><summary>Thought Process</summary>\n\n${msg.reasoning}\n\n</details>\n\n`;
+          if (showThinking) {
+            md += `> 💭 **Thought Process**\n>\n> ${msg.reasoning.replace(/\n/g, "\n> ")}\n\n`;
+          } else {
+            md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*\n\n`;
+          }
         }
         md += `${msg.content}\n\n`;
         if (msg.citations && msg.citations.length > 0) {
@@ -93,12 +142,13 @@ export default function Command(props?: { conversation?: Conversation }) {
     }
 
     if (isLoading) {
-      md += `### 🤖 Assistant *(Generating...)*\n\n`;
-      if (statusMessage) {
-        md += `> 🌐 *${statusMessage}*\n\n`;
-      }
+      md += `### 🤖 Assistant\n`;
       if (streamingReasoning) {
-        md += `<details open><summary>Thinking...</summary>\n\n${streamingReasoning}\n\n</details>\n\n`;
+        if (showThinking) {
+          md += `> 💭 **Thought Process**\n>\n> ${streamingReasoning.replace(/\n/g, "\n> ")}\n\n`;
+        } else {
+          md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*\n\n`;
+        }
       }
       md += `${streamingContent}\n\n`;
       if (streamingCitations.length > 0) {
@@ -113,15 +163,14 @@ export default function Command(props?: { conversation?: Conversation }) {
   }, [
     conversation,
     isLoading,
-    statusMessage,
-    webSearchEnabled,
+    showThinking,
     streamingContent,
     streamingReasoning,
     streamingCitations,
   ]);
 
-  const handleSubmit = async () => {
-    const trimmed = prompt.trim();
+  const executeChat = async (userPrompt: string, useWebSearch: boolean) => {
+    const trimmed = userPrompt.trim();
     if (!trimmed || isLoading) return;
 
     // Check for API key presence
@@ -152,9 +201,11 @@ export default function Command(props?: { conversation?: Conversation }) {
       return;
     }
 
-    setPrompt("");
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
     setIsLoading(true);
-    setStatusMessage("");
     setStreamingContent("");
     setStreamingReasoning("");
     setStreamingCitations([]);
@@ -176,16 +227,16 @@ export default function Command(props?: { conversation?: Conversation }) {
     const updatedConvo: Conversation = {
       ...conversation,
       title: newTitle,
-      enableWebSearch: webSearchEnabled,
+      enableWebSearch: useWebSearch,
       messages: newMessages,
       updatedAt: Date.now(),
     };
 
     setConversation(updatedConvo);
+    setViewMode("chat");
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
-
     const citationsCollected: Citation[] = [];
 
     try {
@@ -195,7 +246,7 @@ export default function Command(props?: { conversation?: Conversation }) {
           ...prefs,
           provider: conversation.provider,
           modelId: conversation.modelId,
-          enableWebSearch: webSearchEnabled,
+          enableWebSearch: useWebSearch,
         },
         (ev) => {
           if (ev.type === "token") {
@@ -210,7 +261,10 @@ export default function Command(props?: { conversation?: Conversation }) {
             bufferRef.current.reasoning += ev.text;
             setStreamingReasoning(bufferRef.current.reasoning);
           } else if (ev.type === "status") {
-            setStatusMessage(ev.message);
+            showToast({
+              style: Toast.Style.Animated,
+              title: ev.message,
+            });
           } else if (ev.type === "citation") {
             citationsCollected.push(ev.citation);
             setStreamingCitations([...citationsCollected]);
@@ -251,7 +305,6 @@ export default function Command(props?: { conversation?: Conversation }) {
       };
 
       setConversation(finalConvo);
-      // Persist conversation only after completion
       await saveConversation(finalConvo);
     } catch (err: any) {
       if (err.name !== "AbortError") {
@@ -267,9 +320,24 @@ export default function Command(props?: { conversation?: Conversation }) {
         throttleTimeoutRef.current = null;
       }
       setIsLoading(false);
-      setStatusMessage("");
       abortControllerRef.current = null;
     }
+  };
+
+  const handleRename = async (newTitle: string) => {
+    const updated: Conversation = {
+      ...conversation,
+      title: newTitle,
+      updatedAt: Date.now(),
+    };
+    setConversation(updated);
+    if (conversation.messages.length > 0) {
+      await renameConversation(conversation.id, newTitle);
+    }
+    showToast({
+      style: Toast.Style.Success,
+      title: "Conversation renamed",
+    });
   };
 
   const handleNewConversation = () => {
@@ -291,32 +359,122 @@ export default function Command(props?: { conversation?: Conversation }) {
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    setPrompt("");
     setWebSearchEnabled(prefs.enableWebSearch);
     setStreamingContent("");
     setStreamingReasoning("");
     setStreamingCitations([]);
     bufferRef.current = { content: "", reasoning: "" };
     setIsLoading(false);
+    setViewMode("form");
   };
 
+  if (viewMode === "form") {
+    return (
+      <Form
+        navigationTitle="Chat with AI Agent"
+        isLoading={isLoading}
+        actions={
+          <ActionPanel>
+            <Action.SubmitForm
+              title="Send Prompt"
+              icon={Icon.SpeechBubble}
+              onSubmit={(values: Form.Values) => {
+                const text = String(values.prompt || "").trim();
+                const search =
+                  typeof values.webSearch === "boolean" ? values.webSearch : webSearchEnabled;
+                if (text) {
+                  setWebSearchEnabled(search);
+                  executeChat(text, search);
+                }
+              }}
+            />
+            <Action
+              title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
+              icon={Icon.Globe01}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
+              onAction={() => {
+                setWebSearchEnabled(!webSearchEnabled);
+                showToast({
+                  style: Toast.Style.Success,
+                  title: !webSearchEnabled ? "Web Search Enabled" : "Web Search Disabled",
+                });
+              }}
+            />
+            <Action
+              title="Open Extension Preferences"
+              icon={Icon.Cog}
+              onAction={openExtensionPreferences}
+            />
+          </ActionPanel>
+        }
+      >
+        <Form.TextArea
+          id="prompt"
+          title="Prompt"
+          placeholder="Ask AI agent anything (Web search enabled)..."
+          autoFocus
+        />
+        <Form.Checkbox
+          id="webSearch"
+          title="Web Search"
+          label="Enable real-time web search and page reading"
+          defaultValue={webSearchEnabled}
+          onChange={setWebSearchEnabled}
+        />
+      </Form>
+    );
+  }
+
   return (
-    <List
-      isShowingDetail
-      filtering={false}
-      searchText={prompt}
-      onSearchTextChange={setPrompt}
-      isLoading={isLoading}
-      searchBarPlaceholder={
-        isLoading
-          ? "AI is responding..."
-          : conversation.messages.length > 0
-          ? "Ask follow-up..."
-          : "Ask AI agent anything (Web search enabled)..."
-      }
+    <Detail
+      navigationTitle={conversation.title}
+      markdown={buildMarkdown()}
       actions={
         <ActionPanel>
-          <Action title="Submit Prompt" icon={Icon.SpeechBubble} onAction={handleSubmit} />
+          <Action
+            title="Reply / Ask Follow-up"
+            icon={Icon.SpeechBubble}
+            onAction={() =>
+              push(
+                <ReplyModal
+                  conversationTitle={conversation.title}
+                  webSearchEnabled={webSearchEnabled}
+                  onSubmit={(prompt, search) => {
+                    setWebSearchEnabled(search);
+                    executeChat(prompt, search);
+                  }}
+                />
+              )
+            }
+          />
+          <Action
+            title={showThinking ? "Hide Thought Process" : "Show Thought Process"}
+            icon={Icon.LightBulb}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "t" }}
+            onAction={() => {
+              setShowThinking((prev) => {
+                const next = !prev;
+                showToast({
+                  style: Toast.Style.Success,
+                  title: next ? "Thought Process Visible" : "Thought Process Hidden",
+                });
+                return next;
+              });
+            }}
+          />
+          <Action
+            title="Rename Conversation"
+            icon={Icon.Pencil}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
+            onAction={() =>
+              push(
+                <RenameModal
+                  initialTitle={conversation.title}
+                  onRename={handleRename}
+                />
+              )
+            }
+          />
           <Action
             title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
             icon={Icon.Globe01}
@@ -349,11 +507,6 @@ export default function Command(props?: { conversation?: Conversation }) {
           />
         </ActionPanel>
       }
-    >
-      <List.Item
-        title={conversation.title}
-        detail={<List.Item.Detail markdown={buildMarkdown()} />}
-      />
-    </List>
+    />
   );
 }

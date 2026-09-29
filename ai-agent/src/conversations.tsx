@@ -11,7 +11,13 @@ import {
 } from "@vicinae/api";
 import { useEffect, useState } from "react";
 import AskCommand from "./ask.js";
-import { clearConversations, deleteConversation, loadConversations } from "./storage/history.js";
+import {
+  clearConversations,
+  deleteConversation,
+  loadConversations,
+  renameConversation,
+} from "./storage/history.js";
+import { RenameModal } from "./rename-modal.js";
 import { Conversation } from "./types.js";
 
 export default function ConversationsCommand() {
@@ -29,6 +35,22 @@ export default function ConversationsCommand() {
   useEffect(() => {
     loadData();
   }, []);
+
+  const handleRename = async (convo: Conversation, newTitle: string) => {
+    try {
+      await renameConversation(convo.id, newTitle);
+      setConversations((prev) =>
+        prev.map((item) => (item.id === convo.id ? { ...item, title: newTitle } : item))
+      );
+      showToast({ style: Toast.Style.Success, title: "Conversation renamed" });
+    } catch (err: any) {
+      showToast({
+        style: Toast.Style.Failure,
+        title: "Failed to rename conversation",
+        message: err?.message,
+      });
+    }
+  };
 
   const handleDelete = async (convo: Conversation) => {
     try {
@@ -96,6 +118,19 @@ export default function ConversationsCommand() {
                   title="Resume Chat"
                   icon={Icon.ArrowRight}
                   onAction={() => push(<AskCommand conversation={c} />)}
+                />
+                <Action
+                  title="Rename Conversation"
+                  icon={Icon.Pencil}
+                  shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
+                  onAction={() =>
+                    push(
+                      <RenameModal
+                        initialTitle={c.title}
+                        onRename={(newTitle) => handleRename(c, newTitle)}
+                      />
+                    )
+                  }
                 />
                 <Action
                   title="Delete Conversation"

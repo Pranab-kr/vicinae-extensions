@@ -42,3 +42,21 @@ export async function deleteConversation(id: string): Promise<void> {
 export async function clearConversations(): Promise<void> {
   await LocalStorage.removeItem(STORAGE_KEY);
 }
+
+export async function renameConversation(
+  id: string,
+  newTitle: string
+): Promise<Conversation | null> {
+  const cleanTitle = newTitle.trim();
+  if (!cleanTitle) return null;
+  const list = await loadConversations();
+  const existingIdx = list.findIndex((c) => c.id === id);
+  if (existingIdx === -1) return null;
+  list[existingIdx] = {
+    ...list[existingIdx],
+    title: cleanTitle,
+    updatedAt: Date.now(),
+  };
+  await LocalStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+  return list[existingIdx];
+}
