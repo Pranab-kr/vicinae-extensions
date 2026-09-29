@@ -125,7 +125,7 @@ export default function Command(props?: { conversation?: Conversation }) {
     if (!trimmed || isLoading) return;
 
     // Check for API key presence
-    if (prefs.provider === "openrouter" && !prefs.openrouterApiKey) {
+    if (conversation.provider === "openrouter" && !prefs.openrouterApiKey) {
       showToast({
         style: Toast.Style.Failure,
         title: "OpenRouter API Key Missing",
@@ -134,7 +134,7 @@ export default function Command(props?: { conversation?: Conversation }) {
       return;
     }
 
-    if (prefs.provider === "gemini" && !prefs.geminiApiKey) {
+    if (conversation.provider === "gemini" && !prefs.geminiApiKey) {
       showToast({
         style: Toast.Style.Failure,
         title: "Gemini API Key Missing",
@@ -143,7 +143,7 @@ export default function Command(props?: { conversation?: Conversation }) {
       return;
     }
 
-    if (prefs.provider === "openai" && !prefs.openaiApiKey) {
+    if (conversation.provider === "openai" && !prefs.openaiApiKey) {
       showToast({
         style: Toast.Style.Failure,
         title: "OpenAI API Key Missing",
@@ -292,6 +292,7 @@ export default function Command(props?: { conversation?: Conversation }) {
       updatedAt: Date.now(),
     });
     setPrompt("");
+    setWebSearchEnabled(prefs.enableWebSearch);
     setStreamingContent("");
     setStreamingReasoning("");
     setStreamingCitations([]);
