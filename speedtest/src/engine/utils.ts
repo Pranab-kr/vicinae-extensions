@@ -29,9 +29,16 @@ export function calculateJitter(samples: number[]): number {
 }
 
 export function renderGauge(current: number, max: number, width: number = 16): string {
+  const safeWidth = Number.isFinite(width) && width > 0 ? Math.floor(width) : 16;
+  if (!Number.isFinite(max) || max <= 0 || !Number.isFinite(current) || current <= 0) {
+    if (current === Infinity && Number.isFinite(max) && max > 0) {
+      return `[${"█".repeat(safeWidth)}]`;
+    }
+    return `[${"░".repeat(safeWidth)}]`;
+  }
   const clamped = Math.max(0, Math.min(current, max));
-  const ratio = max > 0 ? clamped / max : 0;
-  const filledCount = Math.round(ratio * width);
-  const emptyCount = Math.max(0, width - filledCount);
+  const ratio = clamped / max;
+  const filledCount = Math.min(safeWidth, Math.max(0, Math.round(ratio * safeWidth)));
+  const emptyCount = Math.max(0, safeWidth - filledCount);
   return `[${"█".repeat(filledCount)}${"░".repeat(emptyCount)}]`;
 }

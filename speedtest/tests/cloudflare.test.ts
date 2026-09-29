@@ -156,7 +156,8 @@ describe("cloudflare engine", () => {
     it("measures upload speed by streaming POST chunks", async () => {
       const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
         return {
-          ok: true
+          ok: true,
+          arrayBuffer: async () => new ArrayBuffer(0)
         } as any;
       });
 
@@ -192,6 +193,17 @@ describe("cloudflare engine", () => {
 
       await expect(measureUpload(() => {}, undefined, [1000])).rejects.toThrow("Upload chunk request failed");
     });
+
+    it("drains response body via arrayBuffer after each upload chunk", async () => {
+      const arrayBufferMock = vi.fn().mockResolvedValue(new ArrayBuffer(0));
+      vi.spyOn(globalThis, "fetch").mockResolvedValue({
+        ok: true,
+        arrayBuffer: arrayBufferMock
+      } as any);
+
+      await measureUpload(undefined, undefined, [1000, 2000]);
+      expect(arrayBufferMock).toHaveBeenCalledTimes(2);
+    });
   });
 
   describe("runSpeedtest", () => {
@@ -220,7 +232,7 @@ describe("cloudflare engine", () => {
           } as any;
         }
         if (urlStr.includes("/__up")) {
-          return { ok: true } as any;
+          return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as any;
         }
         return { ok: true } as any;
       });

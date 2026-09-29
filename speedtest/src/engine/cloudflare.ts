@@ -187,6 +187,8 @@ export async function measureUpload(
       throw new Error(`Upload chunk request failed: ${res.status} ${res.statusText}`);
     }
 
+    await res.arrayBuffer();
+
     const chunkEnd = performance.now();
     const chunkDurationMs = Math.max(0.001, chunkEnd - chunkStart);
     bytesTransferred += size;
