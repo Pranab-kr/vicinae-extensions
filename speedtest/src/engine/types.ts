@@ -29,6 +29,7 @@ export interface SpeedResult {
   averageSpeedMbps: number;
   bytesTransferred: number;
   durationMs: number;
+  concurrency?: number;
 }
 
 export interface SpeedtestState {
@@ -39,6 +40,7 @@ export interface SpeedtestState {
   currentPing?: number;
   download?: SpeedResult;
   upload?: SpeedResult;
+  concurrency?: number;
   error?: string;
   startTime?: number;
   endTime?: number;

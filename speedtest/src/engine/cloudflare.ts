@@ -12,8 +12,19 @@ export const DOWN_URL = `${SPEEDTEST_BASE_URL}/__down`;
 export const UP_URL = `${SPEEDTEST_BASE_URL}/__up`;
 
 export const DEFAULT_LATENCY_PROBES = 8;
+export const DEFAULT_CONCURRENCY = 4;
+export const DEFAULT_PHASE_DURATION_MS = 8000;
+export const CHUNK_DOWNLOAD_BYTES = 10_000_000;
+export const CHUNK_UPLOAD_BYTES = 2_500_000;
 export const DEFAULT_DOWNLOAD_BYTES = 25_000_000;
 export const DEFAULT_UPLOAD_CHUNKS = [1_000_000, 2_500_000, 5_000_000, 10_000_000];
+
+export interface StreamTestOptions {
+  durationMs?: number;
+  concurrency?: number;
+  bytes?: number;
+  chunkSizes?: number[];
+}
 
 export const DEFAULT_HEADERS: Record<string, string> = {
   "Cache-Control": "no-cache",
@@ -128,74 +139,118 @@ export async function measureLatency(
 export async function measureDownload(
   onProgress?: (res: SpeedResult) => void,
   signal?: AbortSignal,
-  bytes: number = DEFAULT_DOWNLOAD_BYTES
+  options?: number | StreamTestOptions
 ): Promise<SpeedResult> {
   signal?.throwIfAborted();
+
+  const isLegacyBytes = typeof options === "number";
+  const targetBytes = isLegacyBytes ? options : options?.bytes;
+  const concurrency = isLegacyBytes ? 1 : (options?.concurrency ?? DEFAULT_CONCURRENCY);
+  const durationMs =
+    isLegacyBytes || targetBytes !== undefined
+      ? Number.POSITIVE_INFINITY
+      : (options?.durationMs ?? DEFAULT_PHASE_DURATION_MS);
+
   const startTime = performance.now();
-  const res = await fetch(`${DOWN_URL}?bytes=${bytes}`, {
-    signal,
-    headers: DEFAULT_HEADERS
-  });
-
-  if (!res.ok) {
-    throw new Error(`Download stream request failed: ${res.status} ${res.statusText}`);
-  }
-
-  if (!res.body) {
-    throw new Error("Download response body is not readable");
-  }
-
-  const reader = res.body.getReader();
-  let bytesTransferred = 0;
+  let totalBytesTransferred = 0;
   let lastProgressTime = 0;
   let lastBytes = 0;
   let currentSpeedMbps = 0;
+  const activeReaders = new Set<ReadableStreamDefaultReader<Uint8Array>>();
 
-  try {
-    while (true) {
-      signal?.throwIfAborted();
-      const { done, value } = await reader.read();
-      if (done) break;
+  const updateProgress = (now: number) => {
+    const elapsedSinceLast = now - lastProgressTime;
+    if (lastProgressTime === 0 || elapsedSinceLast >= 100) {
+      const deltaBytes = lastProgressTime === 0 ? totalBytesTransferred : totalBytesTransferred - lastBytes;
+      const dt = lastProgressTime === 0 ? Math.max(0.001, now - startTime) : Math.max(0.001, elapsedSinceLast);
+      currentSpeedMbps = (deltaBytes * 8) / (dt * 1000);
+      lastProgressTime = now;
+      lastBytes = totalBytesTransferred;
 
-      if (value) {
-        bytesTransferred += value.byteLength;
-        const now = performance.now();
-        const elapsedSinceLast = now - lastProgressTime;
+      const totalDurationMs = Math.max(0.001, now - startTime);
+      const averageSpeedMbps = (totalBytesTransferred * 8) / (totalDurationMs * 1000);
 
-        if (lastProgressTime === 0 || elapsedSinceLast >= 100) {
-          const deltaBytes = lastProgressTime === 0 ? bytesTransferred : bytesTransferred - lastBytes;
-          const dt = lastProgressTime === 0 ? Math.max(0.001, now - startTime) : Math.max(0.001, elapsedSinceLast);
-          currentSpeedMbps = (deltaBytes * 8) / (dt * 1000);
-          lastProgressTime = now;
-          lastBytes = bytesTransferred;
+      onProgress?.({
+        currentSpeedMbps,
+        averageSpeedMbps,
+        bytesTransferred: totalBytesTransferred,
+        durationMs: totalDurationMs,
+        concurrency
+      });
+    }
+  };
 
-          const totalDurationMs = Math.max(0.001, now - startTime);
-          const averageSpeedMbps = (bytesTransferred * 8) / (totalDurationMs * 1000);
+  const runWorker = async () => {
+    while (!signal?.aborted) {
+      const now = performance.now();
+      if (now - startTime >= durationMs) break;
+      if (targetBytes !== undefined && totalBytesTransferred >= targetBytes) break;
 
-          onProgress?.({
-            currentSpeedMbps,
-            averageSpeedMbps,
-            bytesTransferred,
-            durationMs: totalDurationMs
-          });
+      const bytesToRequest =
+        targetBytes !== undefined
+          ? Math.min(CHUNK_DOWNLOAD_BYTES, Math.max(1000, targetBytes - totalBytesTransferred))
+          : CHUNK_DOWNLOAD_BYTES;
+
+      const res = await fetch(`${DOWN_URL}?bytes=${bytesToRequest}`, {
+        signal,
+        headers: DEFAULT_HEADERS
+      });
+
+      if (!res.ok) {
+        throw new Error(`Download stream request failed: ${res.status} ${res.statusText}`);
+      }
+
+      if (!res.body) {
+        throw new Error("Download response body is not readable");
+      }
+
+      const reader = res.body.getReader();
+      activeReaders.add(reader);
+
+      try {
+        while (true) {
+          if (signal?.aborted) break;
+          const currentNow = performance.now();
+          if (currentNow - startTime >= durationMs) break;
+          if (targetBytes !== undefined && totalBytesTransferred >= targetBytes) break;
+
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          if (value) {
+            totalBytesTransferred += value.byteLength;
+            updateProgress(performance.now());
+          }
         }
+      } finally {
+        activeReaders.delete(reader);
+        try {
+          await reader.cancel();
+        } catch {}
+        try {
+          reader.releaseLock();
+        } catch {}
       }
     }
+  };
+
+  try {
+    const workers = Array.from({ length: concurrency }, () => runWorker());
+    await Promise.all(workers);
   } catch (err) {
-    if (signal?.aborted) {
+    for (const reader of activeReaders) {
       try {
         await reader.cancel();
       } catch {}
+      try {
+        reader.releaseLock();
+      } catch {}
     }
     throw err;
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {}
   }
 
   const finalDurationMs = Math.max(0.001, performance.now() - startTime);
-  const averageSpeedMbps = (bytesTransferred * 8) / (finalDurationMs * 1000);
+  const averageSpeedMbps = (totalBytesTransferred * 8) / (finalDurationMs * 1000);
   if (currentSpeedMbps === 0) {
     currentSpeedMbps = averageSpeedMbps;
   }
@@ -203,8 +258,9 @@ export async function measureDownload(
   const finalResult: SpeedResult = {
     currentSpeedMbps,
     averageSpeedMbps,
-    bytesTransferred,
-    durationMs: finalDurationMs
+    bytesTransferred: totalBytesTransferred,
+    durationMs: finalDurationMs,
+    concurrency
   };
 
   onProgress?.(finalResult);
@@ -214,68 +270,141 @@ export async function measureDownload(
 export async function measureUpload(
   onProgress?: (res: SpeedResult) => void,
   signal?: AbortSignal,
-  chunkSizes: number[] = DEFAULT_UPLOAD_CHUNKS
+  options?: number[] | StreamTestOptions
 ): Promise<SpeedResult> {
   signal?.throwIfAborted();
+
+  const isLegacyChunks = Array.isArray(options);
+  const fixedChunks = isLegacyChunks ? options : options?.chunkSizes;
+  const concurrency = isLegacyChunks ? 1 : (options?.concurrency ?? DEFAULT_CONCURRENCY);
+  const durationMs =
+    isLegacyChunks || fixedChunks !== undefined
+      ? Number.POSITIVE_INFINITY
+      : (options?.durationMs ?? DEFAULT_PHASE_DURATION_MS);
+
   const startTime = performance.now();
-  let bytesTransferred = 0;
+  let totalBytesTransferred = 0;
+  let lastProgressTime = 0;
+  let lastBytes = 0;
   let currentSpeedMbps = 0;
 
-  for (const size of chunkSizes) {
-    signal?.throwIfAborted();
-    const chunk = new Uint8Array(size);
-    const chunkStart = performance.now();
+  const updateProgress = (now: number) => {
+    const elapsedSinceLast = now - lastProgressTime;
+    if (lastProgressTime === 0 || elapsedSinceLast >= 100) {
+      const deltaBytes = lastProgressTime === 0 ? totalBytesTransferred : totalBytesTransferred - lastBytes;
+      const dt = lastProgressTime === 0 ? Math.max(0.001, now - startTime) : Math.max(0.001, elapsedSinceLast);
+      currentSpeedMbps = (deltaBytes * 8) / (dt * 1000);
+      lastProgressTime = now;
+      lastBytes = totalBytesTransferred;
 
-    const res = await fetch(UP_URL, {
-      method: "POST",
-      headers: DEFAULT_HEADERS,
-      body: chunk,
-      signal
-    });
+      const totalDurationMs = Math.max(0.001, now - startTime);
+      const averageSpeedMbps = (totalBytesTransferred * 8) / (totalDurationMs * 1000);
 
-    if (!res.ok) {
-      throw new Error(`Upload chunk request failed: ${res.status} ${res.statusText}`);
+      onProgress?.({
+        currentSpeedMbps,
+        averageSpeedMbps,
+        bytesTransferred: totalBytesTransferred,
+        durationMs: totalDurationMs,
+        concurrency
+      });
     }
+  };
 
-    await res.arrayBuffer();
+  if (fixedChunks) {
+    for (const size of fixedChunks) {
+      signal?.throwIfAborted();
+      const chunk = new Uint8Array(size);
+      const chunkStart = performance.now();
 
-    const chunkEnd = performance.now();
-    const chunkDurationMs = Math.max(0.001, chunkEnd - chunkStart);
-    bytesTransferred += size;
+      const res = await fetch(UP_URL, {
+        method: "POST",
+        headers: DEFAULT_HEADERS,
+        body: chunk,
+        signal
+      });
 
-    currentSpeedMbps = (size * 8) / (chunkDurationMs * 1000);
-    const totalDurationMs = Math.max(0.001, chunkEnd - startTime);
-    const averageSpeedMbps = (bytesTransferred * 8) / (totalDurationMs * 1000);
+      if (!res.ok) {
+        throw new Error(`Upload chunk request failed: ${res.status} ${res.statusText}`);
+      }
 
-    onProgress?.({
-      currentSpeedMbps,
-      averageSpeedMbps,
-      bytesTransferred,
-      durationMs: totalDurationMs
-    });
+      await res.arrayBuffer();
+
+      const chunkEnd = performance.now();
+      const chunkDurationMs = Math.max(0.001, chunkEnd - chunkStart);
+      totalBytesTransferred += size;
+
+      currentSpeedMbps = (size * 8) / (chunkDurationMs * 1000);
+      const totalDurationMs = Math.max(0.001, chunkEnd - startTime);
+      const averageSpeedMbps = (totalBytesTransferred * 8) / (totalDurationMs * 1000);
+
+      onProgress?.({
+        currentSpeedMbps,
+        averageSpeedMbps,
+        bytesTransferred: totalBytesTransferred,
+        durationMs: totalDurationMs,
+        concurrency: 1
+      });
+    }
+  } else {
+    const runWorker = async () => {
+      while (!signal?.aborted) {
+        const now = performance.now();
+        if (now - startTime >= durationMs) break;
+
+        const chunk = new Uint8Array(CHUNK_UPLOAD_BYTES);
+        const res = await fetch(UP_URL, {
+          method: "POST",
+          headers: DEFAULT_HEADERS,
+          body: chunk,
+          signal
+        });
+
+        if (!res.ok) {
+          throw new Error(`Upload chunk request failed: ${res.status} ${res.statusText}`);
+        }
+
+        await res.arrayBuffer();
+        totalBytesTransferred += CHUNK_UPLOAD_BYTES;
+        updateProgress(performance.now());
+      }
+    };
+
+    const workers = Array.from({ length: concurrency }, () => runWorker());
+    await Promise.all(workers);
   }
 
   const totalDurationMs = Math.max(0.001, performance.now() - startTime);
-  const averageSpeedMbps = (bytesTransferred * 8) / (totalDurationMs * 1000);
+  const averageSpeedMbps = (totalBytesTransferred * 8) / (totalDurationMs * 1000);
   if (currentSpeedMbps === 0) {
     currentSpeedMbps = averageSpeedMbps;
   }
 
-  return {
+  const finalResult: SpeedResult = {
     currentSpeedMbps,
     averageSpeedMbps,
-    bytesTransferred,
-    durationMs: totalDurationMs
+    bytesTransferred: totalBytesTransferred,
+    durationMs: totalDurationMs,
+    concurrency
   };
+
+  if (!fixedChunks) {
+    onProgress?.(finalResult);
+  }
+  return finalResult;
 }
 
 export async function runSpeedtest(
   onUpdate: (state: SpeedtestState) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: StreamTestOptions
 ): Promise<SpeedtestState> {
+  const durationMs = options?.durationMs ?? DEFAULT_PHASE_DURATION_MS;
+  const concurrency = options?.concurrency ?? DEFAULT_CONCURRENCY;
+
   let state: SpeedtestState = {
     phase: "discovering",
     progressPercent: 0,
+    concurrency,
     startTime: Date.now()
   };
 
@@ -314,40 +443,47 @@ export async function runSpeedtest(
     };
     onUpdate(state);
 
-    // Stage 3: Download
+    // Stage 3: Multi-stream sustained download
     signal?.throwIfAborted();
-    const download = await measureDownload((dl) => {
-      const dlProgress = Math.min(1, dl.bytesTransferred / DEFAULT_DOWNLOAD_BYTES);
-      state = {
-        ...state,
-        phase: "download",
-        progressPercent: Math.round(25 + dlProgress * 45),
-        download: dl
-      };
-      onUpdate(state);
-    }, signal);
+    const download = await measureDownload(
+      (dl) => {
+        const elapsedRatio = Math.min(1, dl.durationMs / durationMs);
+        state = {
+          ...state,
+          phase: "download",
+          progressPercent: Math.min(65, Math.round(25 + elapsedRatio * 40)),
+          download: dl
+        };
+        onUpdate(state);
+      },
+      signal,
+      { durationMs, concurrency, bytes: options?.bytes }
+    );
 
     state = {
       ...state,
       phase: "upload",
-      progressPercent: 70,
+      progressPercent: 65,
       download
     };
     onUpdate(state);
 
-    // Stage 4: Upload
+    // Stage 4: Multi-stream sustained upload
     signal?.throwIfAborted();
-    const totalUploadTarget = DEFAULT_UPLOAD_CHUNKS.reduce((acc, s) => acc + s, 0);
-    const upload = await measureUpload((ul) => {
-      const ulProgress = Math.min(1, ul.bytesTransferred / totalUploadTarget);
-      state = {
-        ...state,
-        phase: "upload",
-        progressPercent: Math.round(70 + ulProgress * 30),
-        upload: ul
-      };
-      onUpdate(state);
-    }, signal);
+    const upload = await measureUpload(
+      (ul) => {
+        const elapsedRatio = Math.min(1, ul.durationMs / durationMs);
+        state = {
+          ...state,
+          phase: "upload",
+          progressPercent: Math.min(100, Math.round(65 + elapsedRatio * 35)),
+          upload: ul
+        };
+        onUpdate(state);
+      },
+      signal,
+      { durationMs, concurrency, chunkSizes: options?.chunkSizes }
+    );
 
     state = {
       ...state,
@@ -375,3 +511,4 @@ export async function runSpeedtest(
     throw err;
   }
 }
+

@@ -272,6 +272,51 @@ describe("cloudflare engine", () => {
       await measureUpload(undefined, undefined, [1000, 2000]);
       expect(arrayBufferMock).toHaveBeenCalledTimes(2);
     });
+
+    it("runs sustained multi-stream download with multiple workers", async () => {
+      let activeStreams = 0;
+      let maxConcurrent = 0;
+
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        activeStreams++;
+        maxConcurrent = Math.max(maxConcurrent, activeStreams);
+        const stream = createMockReadableStream([new Uint8Array(10000)]);
+        await new Promise((r) => setTimeout(r, 10));
+        activeStreams--;
+        return { ok: true, body: stream } as any;
+      });
+
+      const res = await measureDownload(undefined, undefined, {
+        durationMs: 40,
+        concurrency: 3
+      });
+
+      expect(maxConcurrent).toBeGreaterThanOrEqual(2);
+      expect(res.bytesTransferred).toBeGreaterThan(0);
+      expect(res.concurrency).toBe(3);
+    });
+
+    it("runs sustained multi-stream upload with multiple workers", async () => {
+      let activeUploads = 0;
+      let maxConcurrent = 0;
+
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        activeUploads++;
+        maxConcurrent = Math.max(maxConcurrent, activeUploads);
+        await new Promise((r) => setTimeout(r, 10));
+        activeUploads--;
+        return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as any;
+      });
+
+      const res = await measureUpload(undefined, undefined, {
+        durationMs: 40,
+        concurrency: 3
+      });
+
+      expect(maxConcurrent).toBeGreaterThanOrEqual(2);
+      expect(res.bytesTransferred).toBeGreaterThan(0);
+      expect(res.concurrency).toBe(3);
+    });
   });
 
   describe("runSpeedtest", () => {
@@ -306,9 +351,13 @@ describe("cloudflare engine", () => {
       });
 
       const states: SpeedtestState[] = [];
-      const finalState = await runSpeedtest((state) => {
-        states.push({ ...state });
-      });
+      const finalState = await runSpeedtest(
+        (state) => {
+          states.push({ ...state });
+        },
+        undefined,
+        { durationMs: 40, concurrency: 2 }
+      );
 
       expect(finalState.phase).toBe("complete");
       expect(finalState.progressPercent).toBe(100);

@@ -135,6 +135,7 @@ export function buildMarkdown(state: SpeedtestState): string {
   lines.push("");
   lines.push("| Attribute | Value |");
   lines.push("| :--- | :--- |");
+  lines.push(`| **Connections** | ${state.concurrency ? `Multi (${state.concurrency} streams)` : "Multi (4 streams)"} |`);
   lines.push(`| **ISP / Network** | ${state.server?.isp || "—"} |`);
 
   const locParts = [state.server?.city, state.server?.country].filter(Boolean);
@@ -155,6 +156,7 @@ export function generateSummaryMarkdown(state: SpeedtestState): string {
     "# Vicinae Speedtest Results",
     "",
     `- **Status:** ${state.phase.toUpperCase()}`,
+    `- **Connections:** ${state.concurrency ? `Multi (${state.concurrency} streams)` : "Multi (4 streams)"}`,
     `- **Download:** ${state.download ? formatSpeed(state.download.averageSpeedMbps) : "N/A"}`,
     `- **Upload:** ${state.upload ? formatSpeed(state.upload.averageSpeedMbps) : "N/A"}`,
     `- **Ping (Avg):** ${state.ping ? `${state.ping.avg.toFixed(1)} ms` : "N/A"}`,
@@ -249,6 +251,10 @@ export default function Command() {
             }
           />
           <Detail.Metadata.Separator />
+          <Detail.Metadata.Label
+            title="Connections"
+            text={state.concurrency ? `Multi (${state.concurrency} streams)` : "Multi (4 streams)"}
+          />
           <Detail.Metadata.Label
             title="Server Colo"
             text={state.server?.colo || "—"}
