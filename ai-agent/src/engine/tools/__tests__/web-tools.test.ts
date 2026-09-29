@@ -48,6 +48,21 @@ describe("isPrivateIP", () => {
 });
 
 describe("isUrlSafe", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    // Default DNS mock resolves public test domains to a public IP without live network calls
+    vi.spyOn(dns, "lookup").mockImplementation(async (hostname: string) => {
+      if (hostname === "example.com" || hostname === "en.wikipedia.org") {
+        return { address: "93.184.216.34", family: 4 };
+      }
+      throw new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("rejects non-http/https protocols", async () => {
     expect(await isUrlSafe("file:///etc/passwd")).toBe(false);
     expect(await isUrlSafe("ftp://server")).toBe(false);
@@ -90,21 +105,19 @@ describe("isUrlSafe", () => {
   });
 
   it("rejects domains that resolve to private IPs via DNS", async () => {
-    const lookupSpy = vi.spyOn(dns, "lookup").mockResolvedValueOnce({
+    vi.spyOn(dns, "lookup").mockResolvedValueOnce({
       address: "127.0.0.1",
       family: 4,
     });
     expect(await isUrlSafe("http://evil-rebinding.com")).toBe(false);
-    lookupSpy.mockRestore();
   });
 
   it("rejects domains when DNS lookup fails", async () => {
-    const lookupSpy = vi.spyOn(dns, "lookup").mockRejectedValueOnce(new Error("ENOTFOUND"));
+    vi.spyOn(dns, "lookup").mockRejectedValueOnce(new Error("ENOTFOUND"));
     expect(await isUrlSafe("http://nonexistent-domain-12345.com")).toBe(false);
-    lookupSpy.mockRestore();
   });
 
-  it("allows public domain names", async () => {
+  it("allows public domain names (mocked DNS, offline-safe)", async () => {
     expect(await isUrlSafe("https://example.com")).toBe(true);
     expect(await isUrlSafe("https://en.wikipedia.org/wiki/Linux")).toBe(true);
   });
@@ -179,10 +192,17 @@ describe("safeFetchWebPage", () => {
 
   beforeEach(() => {
     vi.restoreAllMocks();
+    vi.spyOn(dns, "lookup").mockImplementation(async (hostname: string) => {
+      if (hostname === "example.com") {
+        return { address: "93.184.216.34", family: 4 };
+      }
+      throw new Error(`getaddrinfo ENOTFOUND ${hostname}`);
+    });
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
   it("blocks unsafe target URLs before fetch", async () => {
@@ -230,14 +250,14 @@ describe("safeFetchWebPage", () => {
     );
   });
 
-  it("blocks unsafe redirect URLs", async () => {
+  it("blocks unsafe redirect URLs even when redirect target returns error status", async () => {
     globalThis.fetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      status: 200,
-      statusText: "OK",
+      ok: false,
+      status: 403,
+      statusText: "Forbidden",
       url: "http://169.254.169.254/latest/meta-data",
       headers: new Headers({ "content-type": "text/html" }),
-      text: async () => "AWS credentials",
+      text: async () => "Forbidden",
     });
 
     await expect(safeFetchWebPage("https://example.com/redirect-to-metadata")).rejects.toThrow(
@@ -279,15 +299,16 @@ describe("searchDuckDuckGo", () => {
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.restoreAllMocks();
   });
 
-  it("queries DuckDuckGo and parses search results decoding uddg URLs", async () => {
+  it("queries DuckDuckGo, decodes uddg URLs, and decodes HTML entities", async () => {
     const mockHtml = `
       <div class="result results_links">
         <h2 class="result__title">
-          <a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs&amp;rut=1">Example <b>Documentation</b></a>
+          <a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs&amp;rut=1">Example &amp; &#x27;Test&#x27; <b>Documentation</b></a>
         </h2>
-        <a class="result__snippet" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs">This is an <b>official</b> guide for users.</a>
+        <a class="result__snippet" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs">&quot;Official&quot; guide for &lt;developers&gt;.</a>
       </div>
       <div class="result results_links">
         <h2 class="result__title">
@@ -306,9 +327,9 @@ describe("searchDuckDuckGo", () => {
     const results = await searchDuckDuckGo("example search");
     expect(results).toHaveLength(2);
     expect(results[0]).toEqual({
-      title: "Example Documentation",
+      title: "Example & 'Test' Documentation",
       url: "https://example.com/docs",
-      snippet: "This is an official guide for users.",
+      snippet: '"Official" guide for <developers>.',
     });
     expect(results[1]).toEqual({
       title: "Direct Link Title",
@@ -353,6 +374,29 @@ describe("searchDuckDuckGo", () => {
     });
 
     await searchDuckDuckGo("test", controller.signal);
-    expect(capturedSignal).toBe(controller.signal);
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal?.aborted).toBe(false);
+    controller.abort();
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+
+  it("aborts when caller signal is aborted", async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    globalThis.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.signal?.aborted) {
+        return Promise.reject(new DOMException("The operation was aborted.", "AbortError"));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => "",
+      });
+    });
+
+    await expect(searchDuckDuckGo("test", controller.signal)).rejects.toThrow(
+      /aborted/i
+    );
   });
 });

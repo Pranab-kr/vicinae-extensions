@@ -47,13 +47,14 @@ export async function safeFetchWebPage(
       redirect: "follow",
     });
 
-    if (!resp.ok) {
-      throw new Error(`HTTP Error ${resp.status}: ${resp.statusText}`);
-    }
-
-    // Re-verify redirected final URL
+    // Re-verify redirected final URL before inspecting HTTP status
+    // Ensures unsafe hosts returning 4xx/5xx are blocked immediately by SSRF
     if (resp.url && !(await isUrlSafe(resp.url))) {
       throw new Error(`Redirect to unsafe URL blocked: ${resp.url}`);
+    }
+
+    if (!resp.ok) {
+      throw new Error(`HTTP Error ${resp.status}: ${resp.statusText}`);
     }
 
     const contentType = resp.headers.get("content-type") || "";
