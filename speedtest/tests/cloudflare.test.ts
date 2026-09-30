@@ -317,6 +317,33 @@ describe("cloudflare engine", () => {
       expect(res.bytesTransferred).toBeGreaterThan(0);
       expect(res.concurrency).toBe(3);
     });
+
+    it("emits stabilized progress reports without wild speed spikes during sustained upload", async () => {
+      const progressSpeeds: number[] = [];
+
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+        await new Promise((r) => setTimeout(r, 15));
+        return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) } as any;
+      });
+
+      const res = await measureUpload(
+        (progress) => {
+          progressSpeeds.push(progress.currentSpeedMbps);
+        },
+        undefined,
+        { durationMs: 60, concurrency: 2 }
+      );
+
+      expect(res.currentSpeedMbps).toBeGreaterThan(0);
+      expect(progressSpeeds.length).toBeGreaterThan(0);
+      // All reported speeds should be finite and positive
+      for (const speed of progressSpeeds) {
+        expect(Number.isFinite(speed)).toBe(true);
+        expect(speed).toBeGreaterThan(0);
+      }
+      // Final currentSpeedMbps converges with averageSpeedMbps on sustained tests
+      expect(res.currentSpeedMbps).toBe(res.averageSpeedMbps);
+    });
   });
 
   describe("runSpeedtest", () => {

@@ -30,9 +30,9 @@ describe("index view helpers", () => {
         progressPercent: 0
       };
       const md = buildMarkdown(state);
-      expect(md).toContain("# ⚡ Cloudflare Speed Test");
+      expect(md).toContain("# Speedtest");
       expect(md).toContain("Restart Test");
-      expect(md).toContain("0%");
+      expect(md).toContain("Cloudflare Edge");
     });
 
     it("renders discovering state markdown with server placeholder", () => {
@@ -41,9 +41,9 @@ describe("index view helpers", () => {
         progressPercent: 5
       };
       const md = buildMarkdown(state);
-      expect(md).toContain("Discovering Nearest Server");
-      expect(md).toContain("5%");
-      expect(md).toContain("Waiting...");
+      expect(md).toContain("# Speedtest");
+      expect(md).toContain("Locating server...");
+      expect(md).toContain("Cloudflare Edge");
     });
 
     it("renders ping state markdown with current probe", () => {
@@ -61,12 +61,10 @@ describe("index view helpers", () => {
         }
       };
       const md = buildMarkdown(state);
-      expect(md).toContain("Measuring Latency & Jitter");
+      expect(md).toContain("# Speedtest");
       expect(md).toContain("18.4 ms");
-      expect(md).toContain("Cloudflare");
-      expect(md).toContain("San Francisco, US");
-      expect(md).toContain("SFO");
-      expect(md).toContain("AS13335");
+      expect(md).toContain("Measuring latency & jitter (15%)");
+      expect(md).toContain("Cloudflare SFO (San Francisco, US)");
     });
 
     it("renders download state markdown with streaming telemetry", () => {
@@ -82,11 +80,10 @@ describe("index view helpers", () => {
         }
       };
       const md = buildMarkdown(state);
-      expect(md).toContain("Testing Download Speed");
-      expect(md).toContain("120.4 Mbps");
-      expect(md).toContain("110.2 Mbps");
+      expect(md).toContain("# Speedtest");
+      expect(md).toContain("## ⬇️ 120.4 Mbps");
+      expect(md).toContain("Testing download speed (50%)");
       expect(md).toContain("12.5 ms");
-      expect(md).toContain("1.5 ms");
     });
 
     it("renders upload state markdown with completed download", () => {
@@ -108,9 +105,11 @@ describe("index view helpers", () => {
         }
       };
       const md = buildMarkdown(state);
-      expect(md).toContain("Testing Upload Speed");
+      expect(md).toContain("# Speedtest");
+      expect(md).toContain("## ⬆️ 45.6 Mbps");
+      expect(md).toContain("Testing upload speed (85%)");
       expect(md).toContain("100.0 Mbps");
-      expect(md).toContain("45.6 Mbps");
+      expect(md).toContain("12.0 ms");
     });
 
     it("renders complete state markdown", () => {
@@ -140,13 +139,13 @@ describe("index view helpers", () => {
         endTime: 1700000000000
       };
       const md = buildMarkdown(state);
-      expect(md).toContain("Speedtest Complete");
-      expect(md).toContain("100%");
+      expect(md).toContain("# Speedtest Results");
       expect(md).toContain("200.0 Mbps");
       expect(md).toContain("50.0 Mbps");
       expect(md).toContain("10.2 ms");
-      expect(md).toContain("0.8 ms");
-      expect(md).toContain("Ashburn, US");
+      expect(md).toContain("0.8 ms jitter");
+      expect(md).toContain("Cloudflare IAD (Ashburn, US)");
+      expect(md).toContain("Cloudflare, Inc.");
     });
 
     it("renders error and aborted states correctly", () => {

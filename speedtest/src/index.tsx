@@ -7,12 +7,7 @@ import {
   Icon
 } from "@vicinae/api";
 import { useSpeedtest } from "./hooks/useSpeedtest";
-import {
-  formatBytes,
-  formatDuration,
-  formatSpeed,
-  renderGauge
-} from "./engine/utils";
+import { formatSpeed } from "./engine/utils";
 import type { SpeedtestPhase, SpeedtestState } from "./engine/types";
 
 export function getStatusTag(phase: SpeedtestPhase): { text: string; color: Color } {
@@ -39,111 +34,113 @@ export function getStatusTag(phase: SpeedtestPhase): { text: string; color: Colo
 export function buildMarkdown(state: SpeedtestState): string {
   const lines: string[] = [];
 
+  const locParts = [state.server?.city, state.server?.country].filter(Boolean);
+  const location = locParts.length > 0 ? locParts.join(", ") : undefined;
+  const datacenter = state.server?.colo
+    ? `${state.server.colo}${location ? ` (${location})` : ""}`
+    : location || "Edge";
+
   switch (state.phase) {
     case "idle":
-      lines.push("# ⚡ Cloudflare Speed Test");
+      lines.push("# Speedtest");
       lines.push("");
-      lines.push("Press **Enter** or select **Restart Test** in the action panel to start.");
+      lines.push("Test network latency, download, and upload speeds via Cloudflare Edge.");
+      lines.push("");
+      lines.push("Press **Enter** or select **Restart Test** to start.");
       break;
+
     case "discovering":
-      lines.push("# 🔍 Speedtest: Discovering Nearest Server...");
+      lines.push("# Speedtest");
       lines.push("");
-      lines.push("Locating optimal Cloudflare Edge datacenter and querying network metadata...");
-      break;
-    case "ping":
-      lines.push("# ⏱️ Speedtest: Measuring Latency & Jitter...");
+      lines.push("### 🔍 Locating server...");
       lines.push("");
-      lines.push("Probing Cloudflare Edge network to calculate round-trip time and jitter...");
+      lines.push("Connecting to the nearest Cloudflare Edge datacenter.");
       break;
-    case "download":
-      lines.push("# ⬇️ Speedtest: Testing Download Speed...");
+
+    case "ping": {
+      const pingText =
+        state.currentPing !== undefined
+          ? `${state.currentPing.toFixed(1)} ms`
+          : state.ping
+          ? `${state.ping.avg.toFixed(1)} ms`
+          : "Measuring...";
+      lines.push("# Speedtest");
       lines.push("");
-      lines.push("Streaming multi-megabyte payloads from Cloudflare Edge to determine bandwidth...");
-      break;
-    case "upload":
-      lines.push("# ⬆️ Speedtest: Testing Upload Speed...");
+      lines.push(`## ⏱️ ${pingText}`);
       lines.push("");
-      lines.push("Transmitting binary chunks to Cloudflare Edge to measure throughput...");
+      lines.push(`*Measuring latency & jitter (${state.progressPercent}%)*`);
+      if (state.server) {
+        lines.push("");
+        lines.push(`Connected to **Cloudflare ${datacenter}**`);
+      }
       break;
-    case "complete":
-      lines.push("# ✅ Speedtest Complete");
+    }
+
+    case "download": {
+      const dlSpeed = state.download ? formatSpeed(state.download.currentSpeedMbps) : "—";
+      const pingText = state.ping ? `${state.ping.avg.toFixed(1)} ms` : "—";
+      lines.push("# Speedtest");
       lines.push("");
-      lines.push("Your network performance test has finished successfully!");
+      lines.push(`## ⬇️ ${dlSpeed}`);
+      lines.push("");
+      lines.push(`*Testing download speed (${state.progressPercent}%)*`);
+      lines.push("");
+      lines.push(`⏱️ Latency: **${pingText}** &nbsp;•&nbsp; Server: **${datacenter}**`);
       break;
+    }
+
+    case "upload": {
+      const ulSpeed = state.upload ? formatSpeed(state.upload.currentSpeedMbps) : "—";
+      const dlSummary = state.download ? formatSpeed(state.download.averageSpeedMbps) : "—";
+      const pingText = state.ping ? `${state.ping.avg.toFixed(1)} ms` : "—";
+      lines.push("# Speedtest");
+      lines.push("");
+      lines.push(`## ⬆️ ${ulSpeed}`);
+      lines.push("");
+      lines.push(`*Testing upload speed (${state.progressPercent}%)*`);
+      lines.push("");
+      lines.push(`⬇️ Download: **${dlSummary}** &nbsp;•&nbsp; ⏱️ Latency: **${pingText}**`);
+      break;
+    }
+
+    case "complete": {
+      const dlFinal = state.download ? formatSpeed(state.download.averageSpeedMbps) : "—";
+      const ulFinal = state.upload ? formatSpeed(state.upload.averageSpeedMbps) : "—";
+      const pingText = state.ping ? `${state.ping.avg.toFixed(1)} ms` : "—";
+      const jitterText = state.ping ? `${state.ping.jitter.toFixed(1)} ms` : "—";
+      lines.push("# Speedtest Results");
+      lines.push("");
+      lines.push(`## ⬇️ ${dlFinal} &nbsp;&nbsp;&nbsp;&nbsp; ⬆️ ${ulFinal}`);
+      lines.push("");
+      lines.push(`### ⏱️ ${pingText} &nbsp;•&nbsp; ${jitterText} jitter`);
+      lines.push("");
+      lines.push("---");
+      lines.push("");
+      lines.push(`**Server:** Cloudflare ${datacenter}  `);
+      lines.push(
+        `**Network:** ${state.server?.isp || "Cloudflare Edge"}${
+          state.server?.asn ? ` (AS${state.server.asn})` : ""
+        }`
+      );
+      break;
+    }
+
     case "error":
-      lines.push("# ❌ Speedtest Failed");
+      lines.push("# Speedtest Failed");
       lines.push("");
-      lines.push(`> **Error:** ${state.error || "An unexpected error occurred during testing."}`);
+      lines.push(`> ⚠️ **Error:** ${state.error || "An unexpected error occurred during testing."}`);
+      lines.push("");
+      lines.push("Select **Restart Test** (`⌘R`) to try again.");
       break;
+
     case "aborted":
-      lines.push("# ⏹️ Speedtest Cancelled");
+      lines.push("# Speedtest Cancelled");
       lines.push("");
       lines.push("The speed test was interrupted and cancelled.");
+      lines.push("");
+      lines.push("Select **Restart Test** (`⌘R`) to run a new test.");
       break;
   }
-
-  lines.push("");
-
-  const gauge = renderGauge(state.progressPercent, 100, 20);
-  lines.push(`\`${gauge}\` **${state.progressPercent}%**`);
-  lines.push("");
-
-  lines.push("### Live Telemetry");
-  lines.push("");
-
-  let downloadDisplay = "—";
-  if (state.download) {
-    if (state.phase === "download") {
-      downloadDisplay = `${formatSpeed(state.download.currentSpeedMbps)} (avg: ${formatSpeed(state.download.averageSpeedMbps)})`;
-    } else {
-      downloadDisplay = `${formatSpeed(state.download.averageSpeedMbps)} (${formatBytes(state.download.bytesTransferred)} in ${formatDuration(state.download.durationMs)})`;
-    }
-  } else if (state.phase === "discovering" || state.phase === "ping") {
-    downloadDisplay = "Waiting...";
-  }
-
-  let uploadDisplay = "—";
-  if (state.upload) {
-    if (state.phase === "upload") {
-      uploadDisplay = `${formatSpeed(state.upload.currentSpeedMbps)} (avg: ${formatSpeed(state.upload.averageSpeedMbps)})`;
-    } else {
-      uploadDisplay = `${formatSpeed(state.upload.averageSpeedMbps)} (${formatBytes(state.upload.bytesTransferred)} in ${formatDuration(state.upload.durationMs)})`;
-    }
-  } else if (state.phase === "discovering" || state.phase === "ping" || state.phase === "download") {
-    uploadDisplay = "Waiting...";
-  }
-
-  let pingDisplay = "—";
-  if (state.currentPing !== undefined && state.phase === "ping") {
-    pingDisplay = `${state.currentPing.toFixed(1)} ms`;
-  } else if (state.ping) {
-    pingDisplay = `${state.ping.avg.toFixed(1)} ms (min: ${state.ping.min.toFixed(1)} ms)`;
-  }
-
-  let jitterDisplay = "—";
-  if (state.ping) {
-    jitterDisplay = `${state.ping.jitter.toFixed(1)} ms`;
-  }
-
-  lines.push(`- **Download:** ${downloadDisplay}`);
-  lines.push(`- **Upload:** ${uploadDisplay}`);
-  lines.push(`- **Latency (Ping):** ${pingDisplay}`);
-  lines.push(`- **Jitter:** ${jitterDisplay}`);
-  lines.push("");
-
-  lines.push("### Server & Connection");
-  lines.push("");
-  lines.push("| Attribute | Value |");
-  lines.push("| :--- | :--- |");
-  lines.push(`| **Connections** | ${state.concurrency ? `Multi (${state.concurrency} streams)` : "Multi (4 streams)"} |`);
-  lines.push(`| **ISP / Network** | ${state.server?.isp || "—"} |`);
-
-  const locParts = [state.server?.city, state.server?.country].filter(Boolean);
-  const location = locParts.length > 0 ? locParts.join(", ") : "—";
-  lines.push(`| **Location** | ${location} |`);
-  lines.push(`| **Datacenter (Colo)** | ${state.server?.colo || "—"} |`);
-  lines.push(`| **Client IP** | ${state.server?.ip || "—"} |`);
-  lines.push(`| **ASN** | ${state.server?.asn ? `AS${state.server.asn}` : "—"} |`);
 
   return lines.join("\n");
 }

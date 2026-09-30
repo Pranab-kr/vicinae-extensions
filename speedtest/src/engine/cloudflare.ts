@@ -4,7 +4,7 @@ import type {
   SpeedResult,
   SpeedtestState
 } from "./types";
-import { calculateJitter } from "./utils";
+import { calculateJitter, calculateWindowSpeed, type SpeedSample } from "./utils";
 
 export const SPEEDTEST_BASE_URL = "https://speed.cloudflare.com";
 export const META_URL = `${SPEEDTEST_BASE_URL}/meta`;
@@ -15,7 +15,7 @@ export const DEFAULT_LATENCY_PROBES = 8;
 export const DEFAULT_CONCURRENCY = 4;
 export const DEFAULT_PHASE_DURATION_MS = 8000;
 export const CHUNK_DOWNLOAD_BYTES = 10_000_000;
-export const CHUNK_UPLOAD_BYTES = 2_500_000;
+export const CHUNK_UPLOAD_BYTES = 1_000_000;
 export const DEFAULT_DOWNLOAD_BYTES = 25_000_000;
 export const DEFAULT_UPLOAD_CHUNKS = [1_000_000, 2_500_000, 5_000_000, 10_000_000];
 
@@ -159,8 +159,8 @@ export async function measureDownload(
   const startTime = performance.now();
   let totalBytesTransferred = 0;
   let lastProgressTime = 0;
-  let lastBytes = 0;
   let currentSpeedMbps = 0;
+  const samples: SpeedSample[] = [{ timestamp: startTime, totalBytes: 0 }];
   const activeReaders = new Set<ReadableStreamDefaultReader<Uint8Array>>();
 
   const isSustained = durationMs >= MIN_SUSTAINED_DURATION_MS && Number.isFinite(durationMs);
@@ -171,18 +171,16 @@ export async function measureDownload(
   const updateProgress = (now: number) => {
     const elapsedSinceLast = now - lastProgressTime;
     if (lastProgressTime === 0 || elapsedSinceLast >= 100) {
-      const deltaBytes = lastProgressTime === 0 ? totalBytesTransferred : totalBytesTransferred - lastBytes;
-      const dt = lastProgressTime === 0 ? Math.max(0.001, now - startTime) : Math.max(0.001, elapsedSinceLast);
-      const instantSpeed = (deltaBytes * 8) / (dt * 1000);
+      samples.push({ timestamp: now, totalBytes: totalBytesTransferred });
+      const windowSpeed = calculateWindowSpeed(samples, now, startTime, totalBytesTransferred);
 
       if (currentSpeedMbps === 0) {
-        currentSpeedMbps = instantSpeed;
+        currentSpeedMbps = windowSpeed;
       } else {
-        currentSpeedMbps = currentSpeedMbps * (1 - EMA_ALPHA) + instantSpeed * EMA_ALPHA;
+        currentSpeedMbps = currentSpeedMbps * (1 - EMA_ALPHA) + windowSpeed * EMA_ALPHA;
       }
 
       lastProgressTime = now;
-      lastBytes = totalBytesTransferred;
 
       const totalDurationMs = Math.max(0.001, now - startTime);
       let averageSpeedMbps = (totalBytesTransferred * 8) / (totalDurationMs * 1000);
@@ -289,9 +287,7 @@ export async function measureDownload(
     }
   }
 
-  if (currentSpeedMbps === 0) {
-    currentSpeedMbps = averageSpeedMbps;
-  }
+  currentSpeedMbps = averageSpeedMbps;
 
   const finalResult: SpeedResult = {
     currentSpeedMbps,
@@ -323,8 +319,8 @@ export async function measureUpload(
   const startTime = performance.now();
   let totalBytesTransferred = 0;
   let lastProgressTime = 0;
-  let lastBytes = 0;
   let currentSpeedMbps = 0;
+  const samples: SpeedSample[] = [{ timestamp: startTime, totalBytes: 0 }];
 
   const isSustained = durationMs >= MIN_SUSTAINED_DURATION_MS && Number.isFinite(durationMs);
   const warmUpDurationMs = isSustained ? Math.min(WARMUP_MAX_MS, durationMs * WARMUP_RATIO) : 0;
@@ -334,18 +330,15 @@ export async function measureUpload(
   const updateProgress = (now: number) => {
     const elapsedSinceLast = now - lastProgressTime;
     if (lastProgressTime === 0 || elapsedSinceLast >= 100) {
-      const deltaBytes = lastProgressTime === 0 ? totalBytesTransferred : totalBytesTransferred - lastBytes;
-      const dt = lastProgressTime === 0 ? Math.max(0.001, now - startTime) : Math.max(0.001, elapsedSinceLast);
-      const instantSpeed = (deltaBytes * 8) / (dt * 1000);
+      const windowSpeed = calculateWindowSpeed(samples, now, startTime, totalBytesTransferred);
 
       if (currentSpeedMbps === 0) {
-        currentSpeedMbps = instantSpeed;
+        currentSpeedMbps = windowSpeed;
       } else {
-        currentSpeedMbps = currentSpeedMbps * (1 - EMA_ALPHA) + instantSpeed * EMA_ALPHA;
+        currentSpeedMbps = currentSpeedMbps * (1 - EMA_ALPHA) + windowSpeed * EMA_ALPHA;
       }
 
       lastProgressTime = now;
-      lastBytes = totalBytesTransferred;
 
       const totalDurationMs = Math.max(0.001, now - startTime);
       let averageSpeedMbps = (totalBytesTransferred * 8) / (totalDurationMs * 1000);
@@ -410,11 +403,11 @@ export async function measureUpload(
     }
   } else {
     const runWorker = async () => {
+      const chunk = new Uint8Array(CHUNK_UPLOAD_BYTES);
       while (!signal?.aborted) {
         const now = performance.now();
         if (now - startTime >= durationMs) break;
 
-        const chunk = new Uint8Array(CHUNK_UPLOAD_BYTES);
         const res = await fetch(UP_URL, {
           method: "POST",
           headers: DEFAULT_HEADERS,
@@ -427,8 +420,10 @@ export async function measureUpload(
         }
 
         await res.arrayBuffer();
+        const finishTime = performance.now();
         totalBytesTransferred += CHUNK_UPLOAD_BYTES;
-        updateProgress(performance.now());
+        samples.push({ timestamp: finishTime, totalBytes: totalBytesTransferred });
+        updateProgress(finishTime);
       }
     };
 
@@ -446,9 +441,7 @@ export async function measureUpload(
     }
   }
 
-  if (currentSpeedMbps === 0) {
-    currentSpeedMbps = averageSpeedMbps;
-  }
+  currentSpeedMbps = averageSpeedMbps;
 
   const finalResult: SpeedResult = {
     currentSpeedMbps,

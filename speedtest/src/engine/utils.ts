@@ -42,3 +42,37 @@ export function renderGauge(current: number, max: number, width: number = 16): s
   const emptyCount = Math.max(0, safeWidth - filledCount);
   return `[${"█".repeat(filledCount)}${"░".repeat(emptyCount)}]`;
 }
+
+export interface SpeedSample {
+  timestamp: number;
+  totalBytes: number;
+}
+
+export const DEFAULT_SPEED_WINDOW_MS = 1200;
+
+export function calculateWindowSpeed(
+  samples: SpeedSample[],
+  now: number,
+  startTime: number,
+  totalBytes: number,
+  windowMs: number = DEFAULT_SPEED_WINDOW_MS
+): number {
+  if (!Number.isFinite(totalBytes) || totalBytes <= 0) return 0;
+
+  // Prune samples older than (now - windowMs), keeping the sample at or just before the cutoff
+  while (samples.length > 2 && samples[1].timestamp < now - windowMs) {
+    samples.shift();
+  }
+
+  const base = samples.length > 0 ? samples[0] : null;
+  const dt = base ? Math.max(0.001, now - base.timestamp) : Math.max(0.001, now - startTime);
+  const deltaBytes = base ? Math.max(0, totalBytes - base.totalBytes) : totalBytes;
+
+  if (dt < 100) {
+    const totalDt = Math.max(1, now - startTime);
+    return (totalBytes * 8) / (totalDt * 1000);
+  }
+
+  return (deltaBytes * 8) / (dt * 1000);
+}
+
