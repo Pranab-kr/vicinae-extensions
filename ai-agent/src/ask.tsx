@@ -446,14 +446,14 @@ export function ChatView(props: {
     if (sections.length > 1) {
       if (activeQueryIndex === "all") {
         md += `> 📜 **Full Conversation (${sections.length} queries)**\n`;
-        md += `> ⌨️ *Press **Ctrl+B** to jump to query | **Ctrl+Down** for latest | **Enter** to reply*\n\n---\n\n`;
+        md += `> ⌨️ *Press **Ctrl+P** to jump to query | **Ctrl+Down** for latest | **Enter** to reply*\n\n---\n\n`;
       } else {
         const currentSec = sections[activeQueryIndex];
         const snippet = currentSec
           ? currentSec.userMessage.content.slice(0, 70).replace(/\n/g, " ")
           : "";
         md += `> 📌 **Query ${activeQueryIndex + 1} of ${sections.length}:** *"${snippet}"*\n`;
-        md += `> ⌨️ *Press **Ctrl+B** to switch query | **Ctrl+Shift+A** for all queries | **Enter** to reply*\n\n---\n\n`;
+        md += `> ⌨️ *Press **Ctrl+P** to switch query | **Ctrl+Shift+A** for all queries | **Enter** to reply*\n\n---\n\n`;
       }
     }
 
@@ -534,9 +534,18 @@ export function ChatView(props: {
             onAction={openReplyModal}
           />
           {sections.length > 1 && (
+            <Action
+              title="Scroll to Bottom / Latest Response"
+              icon={Icon.ArrowDown}
+              shortcut={{ modifiers: ["cmd"], key: "arrowDown" }}
+              onAction={scrollToBottom}
+            />
+          )}
+          {sections.length > 1 && (
             <ActionPanel.Submenu
-              title="Jump to Question / Query"
+              title="Jump to Query (Ctrl+P)"
               icon={Icon.List}
+              shortcut={{ modifiers: ["cmd"], key: "p" }}
             >
               <Action
                 title="📜 Show All Queries (Full Chat)"
@@ -572,14 +581,6 @@ export function ChatView(props: {
                 onAction={openQuerySwitcher}
               />
             </ActionPanel.Submenu>
-          )}
-          {sections.length > 1 && (
-            <Action
-              title="Scroll to Bottom / Latest Response"
-              icon={Icon.ArrowDown}
-              shortcut={{ modifiers: ["cmd"], key: "arrowDown" }}
-              onAction={scrollToBottom}
-            />
           )}
           {sections.length > 1 && (
             <Action
