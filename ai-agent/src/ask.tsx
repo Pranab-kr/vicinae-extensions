@@ -545,12 +545,6 @@ export function ChatView(props: {
             shortcut={{ modifiers: ["cmd"], key: "arrowDown" }}
             onAction={scrollToBottom}
           />
-          <Action
-            title="Jump to Latest Response"
-            icon={Icon.ArrowDown}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
-            onAction={scrollToBottom}
-          />
           {sections.length > 1 && (
             <Action
               title={
