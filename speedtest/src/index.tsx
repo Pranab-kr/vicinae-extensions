@@ -40,7 +40,7 @@ export function buildMarkdown(state: SpeedtestState): string {
     ? `${state.server.colo}${location ? ` (${location})` : ""}`
     : location || "Edge";
 
-  const gauge = renderGauge(state.progressPercent, 100, 20);
+  const gauge = renderGauge(state.progressPercent, 100, 14);
 
   switch (state.phase) {
     case "idle":
