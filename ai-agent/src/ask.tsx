@@ -12,6 +12,7 @@ import {
 } from "@vicinae/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { dispatchAgentChat } from "./engine/client.js";
+import { QuerySwitcher } from "./query-switcher.js";
 import { RenameModal } from "./rename-modal.js";
 import {
   generateConversationTitle,
@@ -19,6 +20,8 @@ import {
   saveConversation,
 } from "./storage/history.js";
 import { Citation, Conversation, Message, Preferences } from "./types.js";
+import { normalizeMarkdownForVicinae } from "./utils/markdown.js";
+import { QuerySection, getQuerySections } from "./utils/sections.js";
 
 function ReplyModal(props: {
   conversationTitle: string;
@@ -72,33 +75,23 @@ function ReplyModal(props: {
   );
 }
 
-export default function Command(props?: { conversation?: Conversation }) {
+export function ChatView(props: {
+  initialConversation: Conversation;
+  initialPrompt?: string;
+  initialWebSearch?: boolean;
+  isPushedFromForm?: boolean;
+}) {
   const prefs = getPreferenceValues<Preferences>();
-  const { push } = useNavigation();
+  const { push, pop } = useNavigation();
   const [isLoading, setIsLoading] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(
-    props?.conversation ? props.conversation.enableWebSearch : prefs.enableWebSearch
+    props.initialConversation.enableWebSearch
   );
+  const [conversation, setConversation] = useState<Conversation>(props.initialConversation);
 
-  const [conversation, setConversation] = useState<Conversation>(() => {
-    if (props?.conversation) return props.conversation;
-    return {
-      id: String(Date.now()),
-      title: "New Conversation",
-      provider: prefs.provider,
-      modelId: prefs.modelId,
-      enableWebSearch: prefs.enableWebSearch,
-      systemPrompt: prefs.systemPrompt || "",
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    };
-  });
-
-  const [viewMode, setViewMode] = useState<"form" | "chat">(() => {
-    return props?.conversation && props.conversation.messages.length > 0 ? "chat" : "form";
-  });
+  // activeQueryIndex: "all" displays full conversation, number displays that specific query turn
+  const [activeQueryIndex, setActiveQueryIndex] = useState<number | "all">("all");
 
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
@@ -108,6 +101,7 @@ export default function Command(props?: { conversation?: Conversation }) {
   const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const bufferRef = useRef({ content: "", reasoning: "" });
   const isNavigatingRef = useRef(false);
+  const initialExecutionFiredRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -119,58 +113,6 @@ export default function Command(props?: { conversation?: Conversation }) {
       }
     };
   }, []);
-
-  const buildMarkdown = useCallback(() => {
-    let md = `# ${conversation.title}\n\n`;
-
-    for (const msg of conversation.messages) {
-      if (msg.role === "user") {
-        md += `### 👤 You\n${msg.content}\n\n`;
-      } else {
-        md += `### 🤖 Assistant\n`;
-        if (msg.reasoning) {
-          if (showThinking) {
-            md += `> 💭 **Thought Process**\n>\n> ${msg.reasoning.replace(/\n/g, "\n> ")}\n\n`;
-          } else {
-            md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*\n\n`;
-          }
-        }
-        md += `${msg.content}\n\n`;
-        if (msg.citations && msg.citations.length > 0) {
-          md += `**Sources:**\n`;
-          msg.citations.forEach((c, idx) => {
-            md += `[${idx + 1}] [${c.title}](${c.url})\n`;
-          });
-          md += `\n`;
-        }
-      }
-      md += `---\n\n`;
-    }
-
-    if (isLoading) {
-      md += `### 🤖 Assistant\n`;
-      if (streamingReasoning) {
-        if (showThinking) {
-          md += `> 💭 **Thought Process**\n>\n> ${streamingReasoning.replace(/\n/g, "\n> ")}`;
-        } else {
-          md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*`;
-        }
-        if (streamingContent) {
-          md += `\n\n${streamingContent}`;
-        }
-      } else if (streamingContent) {
-        md += streamingContent;
-      }
-    }
-
-    return md;
-  }, [
-    conversation,
-    isLoading,
-    showThinking,
-    streamingContent,
-    streamingReasoning,
-  ]);
 
   const executeChat = async (userPrompt: string, useWebSearch: boolean) => {
     const trimmed = userPrompt.trim();
@@ -235,8 +177,11 @@ export default function Command(props?: { conversation?: Conversation }) {
       updatedAt: Date.now(),
     };
 
+    // Automatically focus on the newly added query turn during streaming
+    // This anchors scroll position to the active stream and prevents jumping to previous turns!
+    const querySections = getQuerySections(newMessages);
+    setActiveQueryIndex(querySections.length - 1);
     setConversation(updatedConvo);
-    setViewMode("chat");
 
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
@@ -308,7 +253,6 @@ export default function Command(props?: { conversation?: Conversation }) {
       };
 
       // Synchronously commit final conversation and clear streaming state in one batch
-      // This prevents double-rendering the assistant message and avoids resetting auto-scroll to the top!
       setIsLoading(false);
       setStreamingContent("");
       setStreamingReasoning("");
@@ -356,6 +300,14 @@ export default function Command(props?: { conversation?: Conversation }) {
     }
   };
 
+  // Run initial prompt once when pushed from Form
+  useEffect(() => {
+    if (!initialExecutionFiredRef.current && props.initialPrompt) {
+      initialExecutionFiredRef.current = true;
+      executeChat(props.initialPrompt, props.initialWebSearch ?? webSearchEnabled);
+    }
+  }, []);
+
   const handleRename = async (newTitle: string) => {
     const updated: Conversation = {
       ...conversation,
@@ -380,82 +332,26 @@ export default function Command(props?: { conversation?: Conversation }) {
       clearTimeout(throttleTimeoutRef.current);
       throttleTimeoutRef.current = null;
     }
-    setConversation({
-      id: String(Date.now()),
-      title: "New Conversation",
-      provider: prefs.provider,
-      modelId: prefs.modelId,
-      enableWebSearch: prefs.enableWebSearch,
-      systemPrompt: prefs.systemPrompt || "",
-      messages: [],
-      createdAt: Date.now(),
-      updatedAt: Date.now(),
-    });
-    setWebSearchEnabled(prefs.enableWebSearch);
-    setStreamingContent("");
-    setStreamingReasoning("");
-    setStreamingCitations([]);
-    bufferRef.current = { content: "", reasoning: "" };
-    setIsLoading(false);
-    setViewMode("form");
+    if (props.isPushedFromForm) {
+      pop();
+    } else {
+      push(
+        <Command
+          conversation={{
+            id: String(Date.now()),
+            title: "New Conversation",
+            provider: prefs.provider,
+            modelId: prefs.modelId,
+            enableWebSearch: prefs.enableWebSearch,
+            systemPrompt: prefs.systemPrompt || "",
+            messages: [],
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          }}
+        />
+      );
+    }
   };
-
-  if (viewMode === "form") {
-    return (
-      <Form
-        navigationTitle="Chat with AI Agent"
-        isLoading={isLoading}
-        actions={
-          <ActionPanel>
-            <Action.SubmitForm
-              title="Send Prompt"
-              icon={Icon.SpeechBubble}
-              onSubmit={(values: Form.Values) => {
-                const text = String(values.prompt || "").trim();
-                const search =
-                  typeof values.webSearch === "boolean" ? values.webSearch : webSearchEnabled;
-                if (text) {
-                  setWebSearchEnabled(search);
-                  executeChat(text, search);
-                }
-              }}
-            />
-            <Action
-              title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
-              icon={Icon.Globe01}
-              shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
-              onAction={() => {
-                setWebSearchEnabled(!webSearchEnabled);
-                showToast({
-                  style: Toast.Style.Success,
-                  title: !webSearchEnabled ? "Web Search Enabled" : "Web Search Disabled",
-                });
-              }}
-            />
-            <Action
-              title="Open Extension Preferences"
-              icon={Icon.Cog}
-              onAction={openExtensionPreferences}
-            />
-          </ActionPanel>
-        }
-      >
-        <Form.TextArea
-          id="prompt"
-          title="Prompt"
-          placeholder="Ask AI agent anything (Web search enabled)..."
-          autoFocus
-        />
-        <Form.Checkbox
-          id="webSearch"
-          title="Web Search"
-          label="Enable real-time web search and page reading"
-          defaultValue={webSearchEnabled}
-          onChange={setWebSearchEnabled}
-        />
-      </Form>
-    );
-  }
 
   const openReplyModal = () => {
     if (isNavigatingRef.current) return;
@@ -489,6 +385,141 @@ export default function Command(props?: { conversation?: Conversation }) {
     }, 500);
   };
 
+  const sections = getQuerySections(conversation.messages);
+
+  const openQuerySwitcher = () => {
+    if (isNavigatingRef.current) return;
+    isNavigatingRef.current = true;
+    push(
+      <QuerySwitcher
+        sections={sections}
+        activeQueryIndex={activeQueryIndex}
+        onSelect={(selectedIdx) => {
+          setActiveQueryIndex(selectedIdx);
+          showToast({
+            style: Toast.Style.Success,
+            title:
+              selectedIdx === "all"
+                ? "Viewing all questions"
+                : `Viewing Query ${selectedIdx + 1}`,
+          });
+        }}
+      />
+    );
+    setTimeout(() => {
+      isNavigatingRef.current = false;
+    }, 500);
+  };
+
+  const scrollToBottom = () => {
+    if (sections.length > 0) {
+      setActiveQueryIndex(sections.length - 1);
+      showToast({
+        style: Toast.Style.Success,
+        title: `Viewing latest response (Query ${sections.length})`,
+      });
+    }
+  };
+
+  const toggleAllOrActive = () => {
+    if (activeQueryIndex === "all") {
+      if (sections.length > 0) {
+        setActiveQueryIndex(sections.length - 1);
+        showToast({
+          style: Toast.Style.Success,
+          title: `Focusing latest query (${sections.length})`,
+        });
+      }
+    } else {
+      setActiveQueryIndex("all");
+      showToast({
+        style: Toast.Style.Success,
+        title: "Showing full conversation",
+      });
+    }
+  };
+
+  const buildMarkdown = useCallback(() => {
+    let md = `# ${conversation.title}\n\n`;
+
+    // Render Navigation Banner at the top for easy multi-turn orientation
+    if (sections.length > 1) {
+      if (activeQueryIndex === "all") {
+        md += `> 📜 **Full Conversation (${sections.length} queries)**\n`;
+        md += `> ⌨️ *Press **Ctrl+P** to jump to query | **Ctrl+Down** for latest | **Enter** to reply*\n\n---\n\n`;
+      } else {
+        const currentSec = sections[activeQueryIndex];
+        const snippet = currentSec
+          ? currentSec.userMessage.content.slice(0, 70).replace(/\n/g, " ")
+          : "";
+        md += `> 📌 **Query ${activeQueryIndex + 1} of ${sections.length}:** *"${snippet}"*\n`;
+        md += `> ⌨️ *Press **Ctrl+P** to switch query | **Ctrl+Shift+A** for all queries | **Enter** to reply*\n\n---\n\n`;
+      }
+    }
+
+    // Determine which sections to render
+    const sectionsToRender =
+      activeQueryIndex === "all"
+        ? sections
+        : sections.filter((_, idx) => idx === activeQueryIndex);
+
+    for (const sec of sectionsToRender) {
+      md += `### 👤 You\n${sec.userMessage.content}\n\n`;
+
+      if (sec.assistantMessage) {
+        md += `### 🤖 Assistant\n`;
+        if (sec.assistantMessage.reasoning) {
+          if (showThinking) {
+            md += `> 💭 **Thought Process**\n>\n> ${sec.assistantMessage.reasoning.replace(/\n/g, "\n> ")}\n\n`;
+          } else {
+            md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*\n\n`;
+          }
+        }
+        md += `${sec.assistantMessage.content}\n\n`;
+        if (sec.assistantMessage.citations && sec.assistantMessage.citations.length > 0) {
+          md += `**Sources:**\n`;
+          sec.assistantMessage.citations.forEach((c, idx) => {
+            md += `[${idx + 1}] [${c.title}](${c.url})\n`;
+          });
+          md += `\n`;
+        }
+      }
+      md += `---\n\n`;
+    }
+
+    // If currently streaming, display assistant response under the active turn
+    if (isLoading) {
+      md += `### 🤖 Assistant\n`;
+      if (streamingReasoning) {
+        if (showThinking) {
+          md += `> 💭 **Thought Process**\n>\n> ${streamingReasoning.replace(/\n/g, "\n> ")}`;
+        } else {
+          md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*`;
+        }
+        if (streamingContent) {
+          md += `\n\n${streamingContent}`;
+        }
+      } else if (streamingContent) {
+        md += streamingContent;
+      }
+    }
+
+    // Normalize all code blocks (unindented to column 0) so Vicinae's native renderer parses them cleanly
+    return normalizeMarkdownForVicinae(md);
+  }, [
+    conversation,
+    activeQueryIndex,
+    sections,
+    isLoading,
+    showThinking,
+    streamingContent,
+    streamingReasoning,
+  ]);
+
+  const lastAssistantMessage = conversation.messages
+    .filter((m) => m.role === "assistant")
+    .pop()?.content;
+
   return (
     <Detail
       navigationTitle={conversation.title}
@@ -498,8 +529,76 @@ export default function Command(props?: { conversation?: Conversation }) {
           <Action
             title="Reply / Ask Follow-up"
             icon={Icon.SpeechBubble}
+            autoFocus
+            shortcut={{ modifiers: ["cmd"], key: "return" }}
             onAction={openReplyModal}
           />
+          <Action
+            title="Switch Query Section"
+            icon={Icon.List}
+            shortcut={{ modifiers: ["cmd"], key: "p" }}
+            onAction={openQuerySwitcher}
+          />
+          <Action
+            title="Scroll to Bottom / Latest Response"
+            icon={Icon.ArrowDown}
+            shortcut={{ modifiers: ["cmd"], key: "arrowDown" }}
+            onAction={scrollToBottom}
+          />
+          <Action
+            title="Jump to Latest Response"
+            icon={Icon.ArrowDown}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "d" }}
+            onAction={scrollToBottom}
+          />
+          {sections.length > 1 && (
+            <Action
+              title={
+                activeQueryIndex === "all"
+                  ? "Focus Current Query Only"
+                  : "Show All Queries (Full Chat)"
+              }
+              icon={Icon.Eye}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "a" }}
+              onAction={toggleAllOrActive}
+            />
+          )}
+          {sections.length > 1 && (
+            <ActionPanel.Submenu
+              title="Jump to Query (Ctrl+P)"
+              icon={Icon.List}
+              shortcut={{ modifiers: ["cmd"], key: "p" }}
+            >
+              <Action
+                title="📜 Show All Queries (Full Chat)"
+                icon={Icon.Document}
+                onAction={() => {
+                  setActiveQueryIndex("all");
+                  showToast({ style: Toast.Style.Success, title: "Showing full conversation" });
+                }}
+              />
+              {sections.map((sec, idx) => {
+                const userSnippet =
+                  sec.userMessage.content.length > 40
+                    ? sec.userMessage.content.slice(0, 40) + "..."
+                    : sec.userMessage.content;
+                return (
+                  <Action
+                    key={sec.userMessage.id || String(idx)}
+                    title={`[Q${idx + 1}] ${userSnippet}`}
+                    icon={activeQueryIndex === idx ? Icon.Checkmark : Icon.SpeechBubble}
+                    onAction={() => {
+                      setActiveQueryIndex(idx);
+                      showToast({
+                        style: Toast.Style.Success,
+                        title: `Viewing Query ${idx + 1}`,
+                      });
+                    }}
+                  />
+                );
+              })}
+            </ActionPanel.Submenu>
+          )}
           <Action
             title={showThinking ? "Hide Thought Process" : "Show Thought Process"}
             icon={Icon.LightBulb}
@@ -541,9 +640,7 @@ export default function Command(props?: { conversation?: Conversation }) {
           />
           <Action.CopyToClipboard
             title="Copy Last Answer"
-            content={
-              conversation.messages.filter((m) => m.role === "assistant").pop()?.content || ""
-            }
+            content={lastAssistantMessage ? normalizeMarkdownForVicinae(lastAssistantMessage) : ""}
             shortcut={{ modifiers: ["cmd", "shift"], key: "c" }}
           />
           <Action
@@ -553,6 +650,109 @@ export default function Command(props?: { conversation?: Conversation }) {
           />
         </ActionPanel>
       }
+    />
+  );
+}
+
+export function PromptForm(props: {
+  initialWebSearch: boolean;
+  onSubmit: (prompt: string, webSearch: boolean) => void;
+}) {
+  const [webSearchEnabled, setWebSearchEnabled] = useState(props.initialWebSearch);
+
+  return (
+    <Form
+      navigationTitle="Chat with AI Agent"
+      actions={
+        <ActionPanel>
+          <Action.SubmitForm
+            title="Send Prompt"
+            icon={Icon.SpeechBubble}
+            onSubmit={(values: Form.Values) => {
+              const text = String(values.prompt || "").trim();
+              const search =
+                typeof values.webSearch === "boolean" ? values.webSearch : webSearchEnabled;
+              if (text) {
+                setWebSearchEnabled(search);
+                props.onSubmit(text, search);
+              }
+            }}
+          />
+          <Action
+            title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
+            icon={Icon.Globe01}
+            shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
+            onAction={() => {
+              setWebSearchEnabled(!webSearchEnabled);
+              showToast({
+                style: Toast.Style.Success,
+                title: !webSearchEnabled ? "Web Search Enabled" : "Web Search Disabled",
+              });
+            }}
+          />
+          <Action
+            title="Open Extension Preferences"
+            icon={Icon.Cog}
+            onAction={openExtensionPreferences}
+          />
+        </ActionPanel>
+      }
+    >
+      <Form.TextArea
+        id="prompt"
+        title="Prompt"
+        placeholder="Ask AI agent anything (Web search enabled)..."
+        autoFocus
+      />
+      <Form.Checkbox
+        id="webSearch"
+        title="Web Search"
+        label="Enable real-time web search and page reading"
+        defaultValue={webSearchEnabled}
+        onChange={setWebSearchEnabled}
+      />
+    </Form>
+  );
+}
+
+export default function Command(props?: { conversation?: Conversation }) {
+  const prefs = getPreferenceValues<Preferences>();
+  const { push } = useNavigation();
+
+  // If conversation was provided with messages, go directly to ChatView
+  if (props?.conversation && props.conversation.messages.length > 0) {
+    return <ChatView initialConversation={props.conversation} />;
+  }
+
+  // Otherwise, render initial prompt form. Upon submission, push ChatView onto navigation stack.
+  // Using push() ensures Vicinae creates a fresh view with active focus, so Enter works immediately!
+  const handleSubmitInitialPrompt = (text: string, search: boolean) => {
+    const freshConvo: Conversation = props?.conversation || {
+      id: String(Date.now()),
+      title: "New Conversation",
+      provider: prefs.provider,
+      modelId: prefs.modelId,
+      enableWebSearch: search,
+      systemPrompt: prefs.systemPrompt || "",
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    push(
+      <ChatView
+        initialConversation={freshConvo}
+        initialPrompt={text}
+        initialWebSearch={search}
+        isPushedFromForm={true}
+      />
+    );
+  };
+
+  return (
+    <PromptForm
+      initialWebSearch={props?.conversation ? props.conversation.enableWebSearch : prefs.enableWebSearch}
+      onSubmit={handleSubmitInitialPrompt}
     />
   );
 }

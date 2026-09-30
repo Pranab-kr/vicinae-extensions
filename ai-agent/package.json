@@ -91,7 +91,7 @@
       "description": "Instructions defining the agent's behavior and tone",
       "type": "textfield",
       "required": false,
-      "default": "You are a helpful AI assistant with real-time web access. Format responses cleanly in markdown."
+      "default": "You are a helpful AI assistant with real-time web access. Format responses cleanly in markdown with standard unindented code blocks."
     }
   ],
   "dependencies": {
