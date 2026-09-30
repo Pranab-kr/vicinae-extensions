@@ -72,7 +72,7 @@ export function buildMarkdown(state: SpeedtestState): string {
           : "Measuring...";
       lines.push("# Speedtest");
       lines.push("");
-      lines.push(`## ⏱️ ${pingText}`);
+      lines.push(`### ⏱️ ${pingText}`);
       lines.push("");
       lines.push(`*Measuring latency & jitter*`);
       lines.push("");
@@ -89,7 +89,7 @@ export function buildMarkdown(state: SpeedtestState): string {
       const pingText = state.ping ? `${state.ping.avg.toFixed(1)} ms` : "—";
       lines.push("# Speedtest");
       lines.push("");
-      lines.push(`## ⬇️ ${dlSpeed}`);
+      lines.push(`### ⬇️ ${dlSpeed}`);
       lines.push("");
       lines.push(`*Testing download speed*`);
       lines.push("");
@@ -105,7 +105,7 @@ export function buildMarkdown(state: SpeedtestState): string {
       const pingText = state.ping ? `${state.ping.avg.toFixed(1)} ms` : "—";
       lines.push("# Speedtest");
       lines.push("");
-      lines.push(`## ⬆️ ${ulSpeed}`);
+      lines.push(`### ⬆️ ${ulSpeed}`);
       lines.push("");
       lines.push(`*Testing upload speed*`);
       lines.push("");
@@ -122,9 +122,9 @@ export function buildMarkdown(state: SpeedtestState): string {
       const jitterText = state.ping ? `${state.ping.jitter.toFixed(1)} ms` : "—";
       lines.push("# Speedtest Results");
       lines.push("");
-      lines.push(`## ⬇️ ${dlFinal} &nbsp;&nbsp;&nbsp;&nbsp; ⬆️ ${ulFinal}`);
+      lines.push(`### ⬇️ ${dlFinal} &nbsp;&nbsp;&nbsp;&nbsp; ⬆️ ${ulFinal}`);
       lines.push("");
-      lines.push(`### ⏱️ ${pingText} &nbsp;•&nbsp; ${jitterText} jitter`);
+      lines.push(`**⏱️ ${pingText}** &nbsp;•&nbsp; **${jitterText} jitter**`);
       lines.push("");
       lines.push(`\`${gauge}\` **100%**`);
       lines.push("");
