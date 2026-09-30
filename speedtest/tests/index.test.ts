@@ -63,7 +63,8 @@ describe("index view helpers", () => {
       const md = buildMarkdown(state);
       expect(md).toContain("# Speedtest");
       expect(md).toContain("18.4 ms");
-      expect(md).toContain("Measuring latency & jitter (15%)");
+      expect(md).toContain("Measuring latency & jitter");
+      expect(md).toContain("15%");
       expect(md).toContain("Cloudflare SFO (San Francisco, US)");
     });
 
@@ -82,7 +83,8 @@ describe("index view helpers", () => {
       const md = buildMarkdown(state);
       expect(md).toContain("# Speedtest");
       expect(md).toContain("## ⬇️ 120.4 Mbps");
-      expect(md).toContain("Testing download speed (50%)");
+      expect(md).toContain("Testing download speed");
+      expect(md).toContain("50%");
       expect(md).toContain("12.5 ms");
     });
 
@@ -107,7 +109,8 @@ describe("index view helpers", () => {
       const md = buildMarkdown(state);
       expect(md).toContain("# Speedtest");
       expect(md).toContain("## ⬆️ 45.6 Mbps");
-      expect(md).toContain("Testing upload speed (85%)");
+      expect(md).toContain("Testing upload speed");
+      expect(md).toContain("85%");
       expect(md).toContain("100.0 Mbps");
       expect(md).toContain("12.0 ms");
     });

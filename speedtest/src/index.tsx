@@ -7,7 +7,7 @@ import {
   Icon
 } from "@vicinae/api";
 import { useSpeedtest } from "./hooks/useSpeedtest";
-import { formatSpeed } from "./engine/utils";
+import { formatSpeed, renderGauge } from "./engine/utils";
 import type { SpeedtestPhase, SpeedtestState } from "./engine/types";
 
 export function getStatusTag(phase: SpeedtestPhase): { text: string; color: Color } {
@@ -40,11 +40,15 @@ export function buildMarkdown(state: SpeedtestState): string {
     ? `${state.server.colo}${location ? ` (${location})` : ""}`
     : location || "Edge";
 
+  const gauge = renderGauge(state.progressPercent, 100, 20);
+
   switch (state.phase) {
     case "idle":
       lines.push("# Speedtest");
       lines.push("");
       lines.push("Test network latency, download, and upload speeds via Cloudflare Edge.");
+      lines.push("");
+      lines.push(`\`${gauge}\` **0%**`);
       lines.push("");
       lines.push("Press **Enter** or select **Restart Test** to start.");
       break;
@@ -55,6 +59,8 @@ export function buildMarkdown(state: SpeedtestState): string {
       lines.push("### 🔍 Locating server...");
       lines.push("");
       lines.push("Connecting to the nearest Cloudflare Edge datacenter.");
+      lines.push("");
+      lines.push(`\`${gauge}\` **${state.progressPercent}%**`);
       break;
 
     case "ping": {
@@ -68,7 +74,9 @@ export function buildMarkdown(state: SpeedtestState): string {
       lines.push("");
       lines.push(`## ⏱️ ${pingText}`);
       lines.push("");
-      lines.push(`*Measuring latency & jitter (${state.progressPercent}%)*`);
+      lines.push(`*Measuring latency & jitter*`);
+      lines.push("");
+      lines.push(`\`${gauge}\` **${state.progressPercent}%**`);
       if (state.server) {
         lines.push("");
         lines.push(`Connected to **Cloudflare ${datacenter}**`);
@@ -83,7 +91,9 @@ export function buildMarkdown(state: SpeedtestState): string {
       lines.push("");
       lines.push(`## ⬇️ ${dlSpeed}`);
       lines.push("");
-      lines.push(`*Testing download speed (${state.progressPercent}%)*`);
+      lines.push(`*Testing download speed*`);
+      lines.push("");
+      lines.push(`\`${gauge}\` **${state.progressPercent}%**`);
       lines.push("");
       lines.push(`⏱️ Latency: **${pingText}** &nbsp;•&nbsp; Server: **${datacenter}**`);
       break;
@@ -97,7 +107,9 @@ export function buildMarkdown(state: SpeedtestState): string {
       lines.push("");
       lines.push(`## ⬆️ ${ulSpeed}`);
       lines.push("");
-      lines.push(`*Testing upload speed (${state.progressPercent}%)*`);
+      lines.push(`*Testing upload speed*`);
+      lines.push("");
+      lines.push(`\`${gauge}\` **${state.progressPercent}%**`);
       lines.push("");
       lines.push(`⬇️ Download: **${dlSummary}** &nbsp;•&nbsp; ⏱️ Latency: **${pingText}**`);
       break;
@@ -113,6 +125,8 @@ export function buildMarkdown(state: SpeedtestState): string {
       lines.push(`## ⬇️ ${dlFinal} &nbsp;&nbsp;&nbsp;&nbsp; ⬆️ ${ulFinal}`);
       lines.push("");
       lines.push(`### ⏱️ ${pingText} &nbsp;•&nbsp; ${jitterText} jitter`);
+      lines.push("");
+      lines.push(`\`${gauge}\` **100%**`);
       lines.push("");
       lines.push("---");
       lines.push("");
@@ -130,6 +144,8 @@ export function buildMarkdown(state: SpeedtestState): string {
       lines.push("");
       lines.push(`> ⚠️ **Error:** ${state.error || "An unexpected error occurred during testing."}`);
       lines.push("");
+      lines.push(`\`${gauge}\` **${state.progressPercent}%**`);
+      lines.push("");
       lines.push("Select **Restart Test** (`⌘R`) to try again.");
       break;
 
@@ -137,6 +153,8 @@ export function buildMarkdown(state: SpeedtestState): string {
       lines.push("# Speedtest Cancelled");
       lines.push("");
       lines.push("The speed test was interrupted and cancelled.");
+      lines.push("");
+      lines.push(`\`${gauge}\` **${state.progressPercent}%**`);
       lines.push("");
       lines.push("Select **Restart Test** (`⌘R`) to run a new test.");
       break;
