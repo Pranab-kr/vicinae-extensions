@@ -446,14 +446,14 @@ export function ChatView(props: {
     if (sections.length > 1) {
       if (activeQueryIndex === "all") {
         md += `> 📜 **Full Conversation (${sections.length} queries)**\n`;
-        md += `> ⌨️ *Press **Ctrl+P** to jump to query | **Ctrl+Down** for latest | **Enter** to reply*\n\n---\n\n`;
+        md += `> ⌨️ *Press **Ctrl+B** to jump to query | **Ctrl+Down** for latest | **Enter** to reply*\n\n---\n\n`;
       } else {
         const currentSec = sections[activeQueryIndex];
         const snippet = currentSec
           ? currentSec.userMessage.content.slice(0, 70).replace(/\n/g, " ")
           : "";
         md += `> 📌 **Query ${activeQueryIndex + 1} of ${sections.length}:** *"${snippet}"*\n`;
-        md += `> ⌨️ *Press **Ctrl+P** to switch query | **Ctrl+Shift+A** for all queries | **Enter** to reply*\n\n---\n\n`;
+        md += `> ⌨️ *Press **Ctrl+B** to switch query | **Ctrl+Shift+A** for all queries | **Enter** to reply*\n\n---\n\n`;
       }
     }
 
@@ -534,12 +534,44 @@ export function ChatView(props: {
             onAction={openReplyModal}
           />
           {sections.length > 1 && (
-            <Action
+            <ActionPanel.Submenu
               title="Jump to Question / Query"
               icon={Icon.List}
-              shortcut={{ modifiers: ["cmd"], key: "p" }}
-              onAction={openQuerySwitcher}
-            />
+            >
+              <Action
+                title="📜 Show All Queries (Full Chat)"
+                icon={Icon.BlankDocument}
+                onAction={() => {
+                  setActiveQueryIndex("all");
+                  showToast({ style: Toast.Style.Success, title: "Showing full conversation" });
+                }}
+              />
+              {sections.map((sec, idx) => {
+                const userSnippet =
+                  sec.userMessage.content.length > 40
+                    ? sec.userMessage.content.slice(0, 40) + "..."
+                    : sec.userMessage.content;
+                return (
+                  <Action
+                    key={sec.userMessage.id || String(idx)}
+                    title={`[Q${idx + 1}] ${userSnippet}`}
+                    icon={activeQueryIndex === idx ? Icon.Checkmark : Icon.SpeechBubble}
+                    onAction={() => {
+                      setActiveQueryIndex(idx);
+                      showToast({
+                        style: Toast.Style.Success,
+                        title: `Viewing Query ${idx + 1}`,
+                      });
+                    }}
+                  />
+                );
+              })}
+              <Action
+                title="🔍 Open Searchable List (Full Page)"
+                icon={Icon.MagnifyingGlass}
+                onAction={openQuerySwitcher}
+              />
+            </ActionPanel.Submenu>
           )}
           {sections.length > 1 && (
             <Action
