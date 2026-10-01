@@ -1,6 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { streamGemini } from "../gemini.js";
 import { Message, StreamEvent } from "../../types.js";
+import { searchDuckDuckGo } from "../tools/ddg.js";
+import { safeFetchWebPage } from "../tools/web-fetch.js";
+
+vi.mock("../tools/ddg.js", () => ({
+  searchDuckDuckGo: vi.fn(),
+}));
+
+vi.mock("../tools/web-fetch.js", () => ({
+  safeFetchWebPage: vi.fn(),
+}));
 
 function createSSEStream(text: string): ReadableStream<Uint8Array> {
   return new ReadableStream({
@@ -287,7 +297,7 @@ describe("streamGemini", () => {
     expect(parsedBody.tools).toBeUndefined();
   });
 
-  it("configures googleSearch tool when enableWebSearch is true", async () => {
+  it("configures functionDeclarations tools when enableWebSearch is true", async () => {
     let capturedInit: RequestInit | undefined;
     global.fetch = vi.fn().mockImplementation((_url, init) => {
       capturedInit = init;
@@ -301,14 +311,203 @@ describe("streamGemini", () => {
       [{ id: "1", role: "user", content: "Search", timestamp: Date.now() }],
       {
         apiKey: "AIzaSyTestKey",
-        modelId: "gemini-2.0-flash",
+        modelId: "gemini-3.5-flash",
         enableWebSearch: true,
       },
       () => {}
     );
 
     const parsedBody = JSON.parse(capturedInit?.body as string);
-    expect(parsedBody.tools).toEqual([{ googleSearch: {} }]);
+    expect(parsedBody.tools).toEqual([
+      {
+        functionDeclarations: [
+          {
+            name: "search_web",
+            description: "Search the web for up-to-date real-time information",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                query: { type: "STRING", description: "Search query" },
+              },
+              required: ["query"],
+            },
+          },
+          {
+            name: "fetch_web_page",
+            description: "Fetch and read clean text content from a web URL",
+            parameters: {
+              type: "OBJECT",
+              properties: {
+                url: { type: "STRING", description: "The full http/https URL to read" },
+              },
+              required: ["url"],
+            },
+          },
+        ],
+      },
+    ]);
+  });
+
+  it("executes search_web functionCall and continues stream turn with functionResponse", async () => {
+    vi.mocked(searchDuckDuckGo).mockResolvedValueOnce([
+      { title: "Vicinae News", url: "https://vicinae.com/news", snippet: "Latest news" },
+    ]);
+
+    const turn1SSE =
+      'data: {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "search_web", "args": {"query": "vicinae"}, "id": "call_1"}, "thoughtSignature": "sig123"}]}}]}\n\n';
+    const turn2SSE =
+      'data: {"candidates": [{"content": {"role": "model", "parts": [{"text": "Found Vicinae news."}]}}]}\n\n';
+
+    const capturedInits: RequestInit[] = [];
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      capturedInits.push(init);
+      if (capturedInits.length === 1) {
+        return Promise.resolve({ ok: true, body: createSSEStream(turn1SSE) });
+      }
+      return Promise.resolve({ ok: true, body: createSSEStream(turn2SSE) });
+    });
+
+    const events: StreamEvent[] = [];
+    await streamGemini(
+      [{ id: "1", role: "user", content: "Search for vicinae", timestamp: Date.now() }],
+      {
+        apiKey: "AIzaSyTestKey",
+        modelId: "gemini-3.5-flash",
+        enableWebSearch: true,
+      },
+      (ev) => events.push(ev)
+    );
+
+    expect(searchDuckDuckGo).toHaveBeenCalledWith("vicinae", undefined);
+    expect(events).toContainEqual({
+      type: "status",
+      message: 'Searching web for "vicinae"...',
+    });
+    expect(events).toContainEqual({
+      type: "citation",
+      citation: { title: "Vicinae News", url: "https://vicinae.com/news" },
+    });
+    expect(events).toContainEqual({
+      type: "token",
+      text: "Found Vicinae news.",
+    });
+    expect(events).toContainEqual({ type: "done" });
+
+    // Verify Turn 2 request body had functionResponse and preserved thoughtSignature
+    expect(capturedInits).toHaveLength(2);
+    const turn2Body = JSON.parse(capturedInits[1].body as string);
+    expect(turn2Body.contents).toHaveLength(3);
+    // Model turn contains the functionCall part with its thoughtSignature
+    expect(turn2Body.contents[1]).toEqual({
+      role: "model",
+      parts: [
+        {
+          functionCall: { name: "search_web", args: { query: "vicinae" }, id: "call_1" },
+          thoughtSignature: "sig123",
+        },
+      ],
+    });
+    // User/function turn contains functionResponse
+    expect(turn2Body.contents[2].role).toBe("user");
+    expect(turn2Body.contents[2].parts[0].functionResponse.name).toBe("search_web");
+    expect(turn2Body.contents[2].parts[0].functionResponse.id).toBe("call_1");
+  });
+
+  it("executes fetch_web_page functionCall and continues stream turn with functionResponse", async () => {
+    vi.mocked(safeFetchWebPage).mockResolvedValueOnce({
+      title: "Example Title",
+      content: "Clean extracted page content",
+    });
+
+    const turn1SSE =
+      'data: {"candidates": [{"content": {"role": "model", "parts": [{"functionCall": {"name": "fetch_web_page", "args": {"url": "https://example.com/page"}}, "thoughtSignature": "sig456"}]}}]}\n\n';
+    const turn2SSE =
+      'data: {"candidates": [{"content": {"role": "model", "parts": [{"text": "Page content summary."}]}}]}\n\n';
+
+    const capturedInits: RequestInit[] = [];
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      capturedInits.push(init);
+      if (capturedInits.length === 1) {
+        return Promise.resolve({ ok: true, body: createSSEStream(turn1SSE) });
+      }
+      return Promise.resolve({ ok: true, body: createSSEStream(turn2SSE) });
+    });
+
+    const events: StreamEvent[] = [];
+    await streamGemini(
+      [{ id: "1", role: "user", content: "Read https://example.com/page", timestamp: Date.now() }],
+      {
+        apiKey: "AIzaSyTestKey",
+        modelId: "gemini-3.5-flash",
+        enableWebSearch: true,
+      },
+      (ev) => events.push(ev)
+    );
+
+    expect(safeFetchWebPage).toHaveBeenCalledWith("https://example.com/page", undefined);
+    expect(events).toContainEqual({
+      type: "status",
+      message: "Reading page https://example.com/page...",
+    });
+    expect(events).toContainEqual({
+      type: "citation",
+      citation: { title: "Example Title", url: "https://example.com/page" },
+    });
+    expect(events).toContainEqual({
+      type: "token",
+      text: "Page content summary.",
+    });
+    expect(events).toContainEqual({ type: "done" });
+  });
+
+  it("retries without tools when model rejects tools with 400 status", async () => {
+    let callCount = 0;
+    const capturedInits: RequestInit[] = [];
+
+    global.fetch = vi.fn().mockImplementation((_url, init) => {
+      callCount++;
+      capturedInits.push(init);
+      if (callCount === 1) {
+        return Promise.resolve({
+          ok: false,
+          status: 400,
+          text: vi.fn().mockResolvedValue("Tool use not supported for this model"),
+        });
+      }
+      return Promise.resolve({
+        ok: true,
+        body: createSSEStream(
+          'data: {"candidates": [{"content": {"parts": [{"text": "Fallback answer"}]}}]}\n\n'
+        ),
+      });
+    });
+
+    const events: StreamEvent[] = [];
+    await streamGemini(
+      [{ id: "1", role: "user", content: "Hello", timestamp: Date.now() }],
+      {
+        apiKey: "AIzaSyTestKey",
+        modelId: "gemini-3.5-flash",
+        enableWebSearch: true,
+      },
+      (ev) => events.push(ev)
+    );
+
+    expect(callCount).toBe(2);
+    expect(events).toContainEqual({
+      type: "status",
+      message: "Model does not support tools. Continuing without web search...",
+    });
+    expect(events).toContainEqual({
+      type: "token",
+      text: "Fallback answer",
+    });
+
+    // Check first call had tools, second call did not
+    const firstBody = JSON.parse(capturedInits[0].body as string);
+    const secondBody = JSON.parse(capturedInits[1].body as string);
+    expect(firstBody.tools).toBeDefined();
+    expect(secondBody.tools).toBeUndefined();
   });
 
   it("forwards abort signal to fetch and SSE parser", async () => {
