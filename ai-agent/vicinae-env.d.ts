@@ -24,6 +24,9 @@ type ExtensionPreferences = {
 	/** Custom Base URL - Base URL for Ollama / LocalAI / OpenAI-compatible endpoint */
 	"customBaseUrl": string;
 
+	/** Custom Endpoint API Key - Optional API Key for custom / OpenAI-compatible endpoint (Bearer token) */
+	"customApiKey": string;
+
 	/** Web Search & Fetch - Enables live web browsing for up-to-date information */
 	"enableWebSearch"?: boolean;
 

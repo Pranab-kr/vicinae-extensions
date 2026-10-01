@@ -33,6 +33,7 @@ export interface Preferences {
   geminiApiKey?: string;
   openaiApiKey?: string;
   customBaseUrl?: string;
+  customApiKey?: string;
   enableWebSearch: boolean;
   systemPrompt?: string;
 }

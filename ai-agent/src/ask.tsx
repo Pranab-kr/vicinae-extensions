@@ -19,9 +19,12 @@ import {
   renameConversation,
   saveConversation,
 } from "./storage/history.js";
-import { Citation, Conversation, Message, Preferences } from "./types.js";
-import { normalizeMarkdownForVicinae } from "./utils/markdown.js";
-import { QuerySection, getQuerySections } from "./utils/sections.js";
+import type { Citation, Conversation, Message, Preferences } from "./types.js";
+import {
+  formatStreamingTail,
+  normalizeMarkdownForVicinae,
+} from "./utils/markdown.js";
+import { getQuerySections } from "./utils/sections.js";
 
 function ReplyModal(props: {
   conversationTitle: string;
@@ -96,15 +99,27 @@ export function ChatView(props: {
   const [streamingContent, setStreamingContent] = useState("");
   const [streamingReasoning, setStreamingReasoning] = useState("");
   const [streamingCitations, setStreamingCitations] = useState<Citation[]>([]);
+  const [followLiveStream, setFollowLiveStream] = useState(true);
 
   const abortControllerRef = useRef<AbortController | null>(null);
   const throttleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const bufferRef = useRef({ content: "", reasoning: "" });
   const isNavigatingRef = useRef(false);
   const initialExecutionFiredRef = useRef(false);
+  const activeStatusToastRef = useRef<Toast | null>(null);
+  const isStreamingTokensRef = useRef(false);
+  const isExecutingRef = useRef(false);
+
+  const dismissStatusToast = useCallback(() => {
+    if (activeStatusToastRef.current) {
+      activeStatusToastRef.current.hide();
+      activeStatusToastRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     return () => {
+      dismissStatusToast();
       if (throttleTimeoutRef.current) {
         clearTimeout(throttleTimeoutRef.current);
       }
@@ -112,9 +127,10 @@ export function ChatView(props: {
         abortControllerRef.current.abort();
       }
     };
-  }, []);
+  }, [dismissStatusToast]);
 
-  const executeChat = async (userPrompt: string, useWebSearch: boolean) => {
+  const executeChat = useCallback(
+    async (userPrompt: string, useWebSearch: boolean) => {
     const trimmed = userPrompt.trim();
     if (!trimmed || isLoading) return;
 
@@ -149,6 +165,10 @@ export function ChatView(props: {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+
+    isStreamingTokensRef.current = false;
+    isExecutingRef.current = true;
+    dismissStatusToast();
 
     setIsLoading(true);
     setStreamingContent("");
@@ -198,30 +218,46 @@ export function ChatView(props: {
         },
         (ev) => {
           if (ev.type === "token") {
+            isStreamingTokensRef.current = true;
+            dismissStatusToast();
             bufferRef.current.content += ev.text;
             if (!throttleTimeoutRef.current) {
               throttleTimeoutRef.current = setTimeout(() => {
                 setStreamingContent(bufferRef.current.content);
                 throttleTimeoutRef.current = null;
-              }, 70);
+              }, 120);
             }
           } else if (ev.type === "reasoning") {
+            isStreamingTokensRef.current = true;
+            dismissStatusToast();
             bufferRef.current.reasoning += ev.text;
             setStreamingReasoning(bufferRef.current.reasoning);
           } else if (ev.type === "status") {
-            showToast({
-              style: Toast.Style.Animated,
-              title: ev.message,
-            });
+            dismissStatusToast();
+            if (!isStreamingTokensRef.current && isExecutingRef.current) {
+              showToast({
+                style: Toast.Style.Animated,
+                title: ev.message,
+              }).then((t) => {
+                if (isStreamingTokensRef.current || !isExecutingRef.current) {
+                  t.hide();
+                } else {
+                  activeStatusToastRef.current = t;
+                }
+              });
+            }
           } else if (ev.type === "citation") {
             citationsCollected.push(ev.citation);
             setStreamingCitations([...citationsCollected]);
           } else if (ev.type === "error") {
+            dismissStatusToast();
             showToast({
               style: Toast.Style.Failure,
               title: "Stream Error",
               message: ev.error,
             });
+          } else if (ev.type === "done") {
+            dismissStatusToast();
           }
         },
         abortController.signal
@@ -260,13 +296,13 @@ export function ChatView(props: {
       setConversation(finalConvo);
 
       await saveConversation(finalConvo);
-    } catch (err: any) {
-      if (err.name !== "AbortError") {
-        const errorText = err.message || String(err);
+    } catch (err) {
+      if ((err as Error)?.name !== "AbortError") {
+        const errorText = (err as Error)?.message || String(err);
         showToast({
           style: Toast.Style.Failure,
           title: errorText.includes("402") ? "OpenRouter: Insufficient Credits" : "Request Failed",
-          message: errorText.length > 80 ? errorText.slice(0, 80) + "..." : errorText,
+          message: errorText.length > 80 ? `${errorText.slice(0, 80)}...` : errorText,
         });
 
         const errorMsg: Message = {
@@ -291,6 +327,8 @@ export function ChatView(props: {
         await saveConversation(failedConvo);
       }
     } finally {
+      isExecutingRef.current = false;
+      dismissStatusToast();
       if (throttleTimeoutRef.current) {
         clearTimeout(throttleTimeoutRef.current);
         throttleTimeoutRef.current = null;
@@ -298,7 +336,7 @@ export function ChatView(props: {
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  };
+  }, [conversation, isLoading, prefs, dismissStatusToast]);
 
   // Run initial prompt once when pushed from Form
   useEffect(() => {
@@ -306,7 +344,7 @@ export function ChatView(props: {
       initialExecutionFiredRef.current = true;
       executeChat(props.initialPrompt, props.initialWebSearch ?? webSearchEnabled);
     }
-  }, []);
+  }, [executeChat, props.initialPrompt, props.initialWebSearch, webSearchEnabled]);
 
   const handleRename = async (newTitle: string) => {
     const updated: Conversation = {
@@ -325,6 +363,7 @@ export function ChatView(props: {
   };
 
   const handleNewConversation = () => {
+    dismissStatusToast();
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -440,20 +479,14 @@ export function ChatView(props: {
   };
 
   const buildMarkdown = useCallback(() => {
-    let md = `# ${conversation.title}\n\n`;
+    let md = "";
 
-    // Render Navigation Banner at the top for easy multi-turn orientation
+    // Render clean Navigation Indicator only if multi-turn
     if (sections.length > 1) {
       if (activeQueryIndex === "all") {
-        md += `> 📜 **Full Conversation (${sections.length} queries)**\n`;
-        md += `> ⌨️ *Press **Ctrl+P** to jump to query | **Ctrl+Down** for latest | **Enter** to reply*\n\n---\n\n`;
+        md += `> 📜 **Full Conversation (${sections.length} queries)** • *Ctrl+P to jump to query*\n\n`;
       } else {
-        const currentSec = sections[activeQueryIndex];
-        const snippet = currentSec
-          ? currentSec.userMessage.content.slice(0, 70).replace(/\n/g, " ")
-          : "";
-        md += `> 📌 **Query ${activeQueryIndex + 1} of ${sections.length}:** *"${snippet}"*\n`;
-        md += `> ⌨️ *Press **Ctrl+P** to switch query | **Ctrl+Shift+A** for all queries | **Enter** to reply*\n\n---\n\n`;
+        md += `> 📌 **Query ${activeQueryIndex + 1} of ${sections.length}** • *Ctrl+Shift+A for all queries | Ctrl+P to jump*\n\n`;
       }
     }
 
@@ -464,7 +497,8 @@ export function ChatView(props: {
         : sections.filter((_, idx) => idx === activeQueryIndex);
 
     for (const sec of sectionsToRender) {
-      md += `### 👤 You\n${sec.userMessage.content}\n\n`;
+      const userPrompt = sec.userMessage.content.trim();
+      md += `> 💬 **You:** ${userPrompt}\n\n`;
 
       if (sec.assistantMessage) {
         md += `### 🤖 Assistant\n`;
@@ -484,7 +518,9 @@ export function ChatView(props: {
           md += `\n`;
         }
       }
-      md += `---\n\n`;
+      if (activeQueryIndex === "all") {
+        md += `---\n\n`;
+      }
     }
 
     // If currently streaming, display assistant response under the active turn
@@ -492,28 +528,38 @@ export function ChatView(props: {
       md += `### 🤖 Assistant\n`;
       if (streamingReasoning) {
         if (showThinking) {
-          md += `> 💭 **Thought Process**\n>\n> ${streamingReasoning.replace(/\n/g, "\n> ")}`;
+          md += `> 💭 **Thought Process**\n>\n> ${streamingReasoning.replace(/\n/g, "\n> ")}\n\n`;
         } else {
-          md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*`;
+          md += `> 💭 *Thought process hidden (press Ctrl+Shift+T to show)*\n\n`;
         }
-        if (streamingContent) {
-          md += `\n\n${streamingContent}`;
+      }
+      if (streamingContent) {
+        if (followLiveStream) {
+          md += formatStreamingTail(streamingContent, 20);
+        } else {
+          md += streamingContent;
         }
-      } else if (streamingContent) {
-        md += streamingContent;
+      }
+
+      if (streamingCitations.length > 0) {
+        md += `\n\n**Sources:**\n`;
+        streamingCitations.forEach((c, idx) => {
+          md += `[${idx + 1}] [${c.title}](${c.url})\n`;
+        });
       }
     }
 
     // Normalize all code blocks (unindented to column 0) so Vicinae's native renderer parses them cleanly
     return normalizeMarkdownForVicinae(md);
   }, [
-    conversation,
     activeQueryIndex,
     sections,
     isLoading,
     showThinking,
     streamingContent,
     streamingReasoning,
+    streamingCitations,
+    followLiveStream,
   ]);
 
   const lastAssistantMessage = conversation.messages
@@ -533,6 +579,23 @@ export function ChatView(props: {
             shortcut={{ modifiers: ["cmd"], key: "return" }}
             onAction={openReplyModal}
           />
+          {isLoading && (
+            <Action
+              title={followLiveStream ? "Pause Auto-Follow (Show from Top)" : "Follow Latest Stream"}
+              icon={followLiveStream ? Icon.Eye : Icon.ArrowDown}
+              shortcut={{ modifiers: ["cmd"], key: "f" }}
+              onAction={() => {
+                setFollowLiveStream((prev) => {
+                  const next = !prev;
+                  showToast({
+                    style: Toast.Style.Success,
+                    title: next ? "Auto-following latest stream" : "Showing from top",
+                  });
+                  return next;
+                });
+              }}
+            />
+          )}
           {sections.length > 1 && (
             <Action
               title="Scroll to Bottom / Latest Response"
@@ -544,7 +607,7 @@ export function ChatView(props: {
           {sections.length > 1 && (
             <ActionPanel.Submenu
               title="Jump to Query (Ctrl+P)"
-              icon={Icon.List}
+              icon={Icon.BulletPoints}
               shortcut={{ modifiers: ["cmd"], key: "p" }}
             >
               <Action
@@ -558,7 +621,7 @@ export function ChatView(props: {
               {sections.map((sec, idx) => {
                 const userSnippet =
                   sec.userMessage.content.length > 40
-                    ? sec.userMessage.content.slice(0, 40) + "..."
+                    ? `${sec.userMessage.content.slice(0, 40)}...`
                     : sec.userMessage.content;
                 return (
                   <Action

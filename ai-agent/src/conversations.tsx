@@ -9,7 +9,7 @@ import {
   showToast,
   useNavigation,
 } from "@vicinae/api";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import AskCommand from "./ask.js";
 import {
   clearConversations,
@@ -18,7 +18,7 @@ import {
   renameConversation,
 } from "./storage/history.js";
 import { RenameModal } from "./rename-modal.js";
-import { Conversation } from "./types.js";
+import type { Conversation } from "./types.js";
 
 export default function ConversationsCommand() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -49,16 +49,16 @@ export default function ConversationsCommand() {
     }, 600);
   };
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setIsLoading(true);
     const list = await loadConversations();
     setConversations(list);
     setIsLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
-  }, []);
+  }, [loadData]);
 
   const handleRename = async (convo: Conversation, newTitle: string) => {
     try {
@@ -67,11 +67,11 @@ export default function ConversationsCommand() {
         prev.map((item) => (item.id === convo.id ? { ...item, title: newTitle } : item))
       );
       showToast({ style: Toast.Style.Success, title: "Conversation renamed" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast({
         style: Toast.Style.Failure,
         title: "Failed to rename conversation",
-        message: err?.message,
+        message: (err as Error)?.message || String(err),
       });
     }
   };
@@ -81,11 +81,11 @@ export default function ConversationsCommand() {
       await deleteConversation(convo.id);
       setConversations((prev) => prev.filter((c) => c.id !== convo.id));
       showToast({ style: Toast.Style.Success, title: "Conversation deleted" });
-    } catch (err: any) {
+    } catch (err: unknown) {
       showToast({
         style: Toast.Style.Failure,
         title: "Failed to delete conversation",
-        message: err?.message,
+        message: (err as Error)?.message || String(err),
       });
     }
   };
@@ -102,11 +102,11 @@ export default function ConversationsCommand() {
         await clearConversations();
         setConversations([]);
         showToast({ style: Toast.Style.Success, title: "History cleared" });
-      } catch (err: any) {
+      } catch (err: unknown) {
         showToast({
           style: Toast.Style.Failure,
           title: "Failed to clear history",
-          message: err?.message,
+          message: (err as Error)?.message || String(err),
         });
       }
     }

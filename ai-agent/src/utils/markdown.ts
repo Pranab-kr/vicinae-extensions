@@ -68,3 +68,78 @@ export function normalizeMarkdownForVicinae(text: string): string {
 
   return result.join("\n");
 }
+
+/**
+ * Safely extracts the recent tail of a streaming markdown response while preserving
+ * code block fences and structural integrity.
+ *
+ * If a slice cuts through an open code block, it properly re-opens the code block with
+ * its language fence and closes any unclosed fence at the end so Vicinae's native
+ * renderer does not break or invert code blocks.
+ */
+export function formatStreamingTail(content: string, maxLines = 20): string {
+  if (!content || typeof content !== "string") return "";
+
+  const lines = content.split("\n");
+  if (lines.length <= maxLines + 4) {
+    return content;
+  }
+
+  let startIdx = lines.length - maxLines;
+  let inCodeBlock = false;
+  let codeLang = "";
+  let codeStartIdx = -1;
+
+  for (let i = 0; i < startIdx; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed.startsWith("```")) {
+      if (!inCodeBlock) {
+        inCodeBlock = true;
+        codeLang = trimmed.slice(3).trim();
+        codeStartIdx = i;
+      } else {
+        inCodeBlock = false;
+        codeLang = "";
+        codeStartIdx = -1;
+      }
+    }
+  }
+
+  // If the code block started close to startIdx (within 8 lines), snap to include its opening
+  if (inCodeBlock && codeStartIdx >= 0 && startIdx - codeStartIdx <= 8) {
+    startIdx = codeStartIdx;
+    inCodeBlock = false;
+  }
+
+  const tailLines = lines.slice(startIdx);
+
+  let tailInCode = inCodeBlock;
+  for (const line of tailLines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith("```")) {
+      tailInCode = !tailInCode;
+    }
+  }
+
+  const result: string[] = [
+    "*... [auto-scrolling to latest stream — full text shown when done] ...*\n",
+  ];
+
+  if (inCodeBlock) {
+    result.push(`\`\`\`${codeLang}`);
+    const cStyle = ["py", "python", "sh", "bash", "yaml", "yml", "rb", "r"].includes(
+      codeLang.toLowerCase()
+    )
+      ? "#"
+      : "//";
+    result.push(`${cStyle} ... (earlier code above) ...`);
+  }
+
+  result.push(...tailLines);
+
+  if (tailInCode) {
+    result.push("```");
+  }
+
+  return result.join("\n");
+}

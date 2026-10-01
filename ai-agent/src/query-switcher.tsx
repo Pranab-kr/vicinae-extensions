@@ -1,5 +1,5 @@
 import { Action, ActionPanel, Icon, List, useNavigation } from "@vicinae/api";
-import { QuerySection } from "./utils/sections.js";
+import type { QuerySection } from "./utils/sections.js";
 
 export function QuerySwitcher(props: {
   sections: QuerySection[];
@@ -18,7 +18,7 @@ export function QuerySwitcher(props: {
           key="all"
           title="All Questions & Answers"
           subtitle="View full conversation history"
-          icon={props.activeQueryIndex === "all" ? Icon.Checkmark : Icon.Document}
+          icon={props.activeQueryIndex === "all" ? Icon.Checkmark : Icon.BlankDocument}
           accessories={[
             {
               text: `${props.sections.length} ${props.sections.length === 1 ? "query" : "queries"}`,
@@ -43,10 +43,10 @@ export function QuerySwitcher(props: {
           const isSelected = props.activeQueryIndex === idx;
           const userSnippet =
             sec.userMessage.content.length > 70
-              ? sec.userMessage.content.slice(0, 70) + "..."
+              ? `${sec.userMessage.content.slice(0, 70)}...`
               : sec.userMessage.content;
           const assistantSnippet = sec.assistantMessage
-            ? sec.assistantMessage.content.slice(0, 60).replace(/\n/g, " ") + "..."
+            ? `${sec.assistantMessage.content.slice(0, 60).replace(/\n/g, " ")}...`
             : "Streaming or awaiting response...";
 
           return (

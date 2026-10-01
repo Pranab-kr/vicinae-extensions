@@ -188,6 +188,32 @@ describe("dispatchAgentChat", () => {
     );
   });
 
+  it("prioritizes customApiKey over openaiApiKey for 'ollama_custom'", async () => {
+    const prefs: Preferences = {
+      provider: "ollama_custom",
+      modelId: "mistral-small",
+      openaiApiKey: "sk-openai-fallback",
+      customApiKey: "sk-custom-secret",
+      customBaseUrl: "https://api.together.xyz/v1",
+      enableWebSearch: false,
+    };
+
+    await dispatchAgentChat(sampleMessages, prefs, onEvent, signal);
+
+    expect(streamOpenAI).toHaveBeenCalledWith(
+      sampleMessages,
+      {
+        apiKey: "sk-custom-secret",
+        modelId: "mistral-small",
+        baseUrl: "https://api.together.xyz/v1",
+        enableWebSearch: false,
+        systemPrompt: undefined,
+      },
+      onEvent,
+      signal
+    );
+  });
+
   it("routes to streamOpenAI when provider is 'ollama_custom' defaulting to localhost URL if customBaseUrl is empty", async () => {
     const prefs: Preferences = {
       provider: "ollama_custom",

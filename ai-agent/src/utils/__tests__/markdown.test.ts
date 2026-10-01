@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeMarkdownForVicinae } from "../markdown.js";
+import { formatStreamingTail, normalizeMarkdownForVicinae } from "../markdown.js";
 
 describe("normalizeMarkdownForVicinae", () => {
   it("normalizes indented code blocks inside numbered lists (hyprctl issue)", () => {
@@ -100,5 +100,58 @@ Follow-up text`;
   it("handles empty or null strings gracefully", () => {
     expect(normalizeMarkdownForVicinae("")).toBe("");
     expect(normalizeMarkdownForVicinae(null as any)).toBe("");
+  });
+});
+
+describe("formatStreamingTail", () => {
+  it("returns content untouched if lines are within threshold", () => {
+    const input = "Line 1\nLine 2\nLine 3";
+    expect(formatStreamingTail(input, 10)).toBe(input);
+  });
+
+  it("preserves code block language and adds comment when slicing inside code block", () => {
+    const lines = [
+      "Here is the code:",
+      "```cpp",
+      "#include <iostream>",
+      "#include <vector>",
+      "int foo() {",
+      "    int a = 1;",
+      "    int b = 2;",
+      "    int c = 3;",
+      "    int d = 4;",
+      "    int e = 5;",
+      "    int f = 6;",
+      "    int g = 7;",
+      "    int h = 8;",
+      "    int i = 9;",
+      "    int j = 10;",
+      "    return a + j;",
+      "}",
+      "```",
+      "Done!",
+    ];
+    const input = lines.join("\n");
+    const result = formatStreamingTail(input, 5);
+
+    expect(result).toContain("```cpp");
+    expect(result).toContain("// ... (earlier code above) ...");
+    expect(result).toContain("Done!");
+  });
+
+  it("closes unclosed code block if tail ends inside code block", () => {
+    const lines = [
+      "Intro text",
+      "```python",
+      "def test():",
+      ...Array.from({ length: 25 }, (_, i) => `    var_${i} = ${i};`),
+    ];
+    const input = lines.join("\n");
+    const result = formatStreamingTail(input, 5);
+
+    expect(result).toContain("```python");
+    expect(result).toContain("# ... (earlier code above) ...");
+    // Must end with closing fence
+    expect(result.trim().endsWith("```")).toBe(true);
   });
 });

@@ -77,6 +77,13 @@
       "default": "http://localhost:11434/v1"
     },
     {
+      "name": "customApiKey",
+      "title": "Custom Endpoint API Key",
+      "description": "Optional API Key for custom / OpenAI-compatible endpoint (Bearer token)",
+      "type": "password",
+      "required": false
+    },
+    {
       "name": "enableWebSearch",
       "title": "Web Search & Fetch",
       "label": "Enable real-time web search and page reading",

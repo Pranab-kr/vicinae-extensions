@@ -51,7 +51,7 @@ export async function dispatchAgentChat(
       return streamOpenAI(
         messages,
         {
-          apiKey: prefs.openaiApiKey || "",
+          apiKey: prefs.customApiKey || prefs.openaiApiKey || "",
           modelId: prefs.modelId,
           baseUrl: prefs.customBaseUrl || "http://localhost:11434/v1",
           enableWebSearch: prefs.enableWebSearch,
