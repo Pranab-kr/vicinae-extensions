@@ -17,17 +17,18 @@ export interface Message {
 export interface Conversation {
   id: string;
   title: string;
-  provider: "openrouter" | "gemini" | "openai" | "ollama_custom";
+  provider: "openrouter" | "gemini" | "openai" | "ollama_custom" | "opencode";
   modelId: string;
   enableWebSearch: boolean;
   systemPrompt: string;
   messages: Message[];
   createdAt: number;
   updatedAt: number;
+  opencodeSessionId?: string;
 }
 
 export interface Preferences {
-  provider: "openrouter" | "gemini" | "openai" | "ollama_custom";
+  provider: "openrouter" | "gemini" | "openai" | "ollama_custom" | "opencode";
   modelId: string;
   openrouterApiKey?: string;
   geminiApiKey?: string;

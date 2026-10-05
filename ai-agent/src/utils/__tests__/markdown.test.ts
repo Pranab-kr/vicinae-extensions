@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatStreamingTail, normalizeMarkdownForVicinae } from "../markdown.js";
+import { formatCompactCitations, formatStreamingTail, normalizeMarkdownForVicinae } from "../markdown.js";
 
 describe("normalizeMarkdownForVicinae", () => {
   it("normalizes indented code blocks inside numbered lists (hyprctl issue)", () => {
@@ -153,5 +153,69 @@ describe("formatStreamingTail", () => {
     expect(result).toContain("# ... (earlier code above) ...");
     // Must end with closing fence
     expect(result.trim().endsWith("```")).toBe(true);
+  });
+});
+
+describe("formatCompactCitations", () => {
+  it("returns empty string when no citations are provided", () => {
+    expect(formatCompactCitations([])).toBe("");
+  });
+
+  it("formats citations in a compact inline quote block", () => {
+    const citations = [
+      { title: "GitHub Release", url: "https://github.com/foo/bar/releases/tag/v1.0" },
+      { title: "Arch Linux Package", url: "https://archlinux.org/packages/extra/x86_64/ytm-tui" },
+    ];
+    const result = formatCompactCitations(citations);
+
+    expect(result).toContain("> 🌐 **Sources:**");
+    expect(result).toContain("[1. GitHub Release](https://github.com/foo/bar/releases/tag/v1.0)");
+    expect(result).toContain("[2. Arch Linux Package](https://archlinux.org/packages/extra/x86_64/ytm-tui)");
+    expect(result).toContain(" • ");
+  });
+
+  it("caps displayed citations at maxDisplay and displays remaining count", () => {
+    const citations = Array.from({ length: 15 }, (_, i) => ({
+      title: `Doc ${i + 1}`,
+      url: `https://example.com/doc-${i + 1}`,
+    }));
+
+    const result = formatCompactCitations(citations, 5);
+
+    expect(result).toContain("[1. Doc 1]");
+    expect(result).toContain("[5. Doc 5]");
+    expect(result).not.toContain("[6. Doc 6]");
+    expect(result).toContain("*(+10 more)*");
+  });
+
+  it("cleans up raw URL titles to concise hostname/path labels", () => {
+    const citations = [
+      {
+        title: "https://api.github.com/repos/Pranab-kr/ytm-tui/releases/390781581",
+        url: "https://api.github.com/repos/Pranab-kr/ytm-tui/releases/390781581",
+      },
+    ];
+
+    const result = formatCompactCitations(citations);
+    expect(result).not.toContain("[1. https://api.github.com/repos/Pranab-kr/ytm-tui/releases/390781581]");
+    expect(result).toContain("[1. github.com/.../390781581](https://api.github.com/repos/Pranab-kr/ytm-tui/releases/390781581)");
+  });
+
+  it("filters out avatar images, templates, and duplicates", () => {
+    const citations = [
+      { title: "Docs", url: "https://example.com/docs" },
+      { title: "Docs Copy", url: "https://example.com/docs" },
+      { title: "Avatar", url: "https://avatars.githubusercontent.com/u/1234?v=4" },
+      { title: "Template", url: "https://uploads.github.com/repos/assets{?name,label}" },
+      { title: "Icon", url: "https://example.com/favicon.ico" },
+    ];
+
+    const result = formatCompactCitations(citations);
+    expect(result).toContain("[1. Docs]");
+    expect(result).not.toContain("avatars.githubusercontent.com");
+    expect(result).not.toContain("{?name,label}");
+    expect(result).not.toContain("favicon.ico");
+    // Duplicate was merged, so no +1 more
+    expect(result).not.toContain("*(+");
   });
 });

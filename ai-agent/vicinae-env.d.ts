@@ -7,7 +7,7 @@
 
 type ExtensionPreferences = {
   /** AI Provider - Select the AI backend to use */
-	"provider"?: "openrouter" | "gemini" | "openai" | "ollama_custom";
+	"provider"?: "openrouter" | "gemini" | "openai" | "ollama_custom" | "opencode";
 
 	/** Model ID - Enter the exact model identifier to call */
 	"modelId"?: string;

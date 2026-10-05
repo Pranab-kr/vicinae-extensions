@@ -191,6 +191,22 @@ describe("history storage layer", () => {
       // The 50th from initial (c-50) is dropped
       expect(stored.find((c: Conversation) => c.id === "c-50")).toBeUndefined();
     });
+
+    it("persists opencode provider and opencodeSessionId", async () => {
+      const opencodeConvo: Conversation = {
+        ...createMockConversation("c-opencode"),
+        provider: "opencode",
+        modelId: "opencode/space-bunny-free",
+        opencodeSessionId: "ses_test_12345",
+      };
+
+      await saveConversation(opencodeConvo);
+
+      const stored = JSON.parse(mockStorage.get("vicinae_ai_agent_conversations_v1")!);
+      expect(stored[0].provider).toBe("opencode");
+      expect(stored[0].modelId).toBe("opencode/space-bunny-free");
+      expect(stored[0].opencodeSessionId).toBe("ses_test_12345");
+    });
   });
 
   describe("deleteConversation", () => {

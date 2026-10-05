@@ -3,6 +3,7 @@ import { dispatchAgentChat } from "../client.js";
 import { streamOpenRouter } from "../openrouter.js";
 import { streamGemini } from "../gemini.js";
 import { streamOpenAI } from "../openai.js";
+import { streamOpenCode } from "../opencode.js";
 import { Message, Preferences, StreamEvent } from "../../types.js";
 
 vi.mock("../openrouter.js", () => ({
@@ -15,6 +16,10 @@ vi.mock("../gemini.js", () => ({
 
 vi.mock("../openai.js", () => ({
   streamOpenAI: vi.fn(),
+}));
+
+vi.mock("../opencode.js", () => ({
+  streamOpenCode: vi.fn(),
 }));
 
 describe("dispatchAgentChat", () => {
@@ -236,6 +241,56 @@ describe("dispatchAgentChat", () => {
       },
       onEvent,
       undefined
+    );
+  });
+
+  it("routes to streamOpenCode when provider is 'opencode'", async () => {
+    const prefs: Preferences = {
+      provider: "opencode",
+      modelId: "opencode/space-bunny-free",
+      enableWebSearch: true,
+      systemPrompt: "You are OpenCode",
+    };
+
+    await dispatchAgentChat(sampleMessages, prefs, onEvent, signal);
+
+    expect(streamOpenCode).toHaveBeenCalledTimes(1);
+    expect(streamOpenCode).toHaveBeenCalledWith(
+      sampleMessages,
+      {
+        modelId: "opencode/space-bunny-free",
+        systemPrompt: "You are OpenCode",
+        sessionId: undefined,
+        onSessionId: undefined,
+      },
+      onEvent,
+      signal
+    );
+  });
+
+  it("passes sessionId and onSessionId to streamOpenCode when options are provided", async () => {
+    const prefs: Preferences = {
+      provider: "opencode",
+      modelId: "opencode/space-bunny-free",
+      enableWebSearch: false,
+    };
+    const onSessionId = vi.fn();
+
+    await dispatchAgentChat(sampleMessages, prefs, onEvent, signal, {
+      sessionId: "ses_123",
+      onSessionId,
+    });
+
+    expect(streamOpenCode).toHaveBeenCalledWith(
+      sampleMessages,
+      {
+        modelId: "opencode/space-bunny-free",
+        systemPrompt: undefined,
+        sessionId: "ses_123",
+        onSessionId,
+      },
+      onEvent,
+      signal
     );
   });
 

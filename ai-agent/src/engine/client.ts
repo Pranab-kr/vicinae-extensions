@@ -2,12 +2,19 @@ import { Message, Preferences, StreamEvent } from "../types.js";
 import { streamOpenRouter } from "./openrouter.js";
 import { streamGemini } from "./gemini.js";
 import { streamOpenAI } from "./openai.js";
+import { streamOpenCode } from "./opencode.js";
+
+export interface DispatchOptions {
+  sessionId?: string;
+  onSessionId?: (sessionId: string) => void;
+}
 
 export async function dispatchAgentChat(
   messages: Message[],
   prefs: Preferences,
   onEvent: (ev: StreamEvent) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options?: DispatchOptions
 ): Promise<void> {
   switch (prefs.provider) {
     case "openrouter":
@@ -56,6 +63,18 @@ export async function dispatchAgentChat(
           baseUrl: prefs.customBaseUrl || "http://localhost:11434/v1",
           enableWebSearch: prefs.enableWebSearch,
           systemPrompt: prefs.systemPrompt,
+        },
+        onEvent,
+        signal
+      );
+    case "opencode":
+      return streamOpenCode(
+        messages,
+        {
+          modelId: prefs.modelId,
+          systemPrompt: prefs.systemPrompt,
+          sessionId: options?.sessionId,
+          onSessionId: options?.onSessionId,
         },
         onEvent,
         signal

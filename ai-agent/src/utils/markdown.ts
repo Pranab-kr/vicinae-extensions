@@ -143,3 +143,89 @@ export function formatStreamingTail(content: string, maxLines = 20): string {
 
   return result.join("\n");
 }
+
+export interface CitationLike {
+  title: string;
+  url: string;
+}
+
+/**
+ * Formats citations into a stylish, compact single-line or small bullet box
+ * to prevent walls of URLs from overwhelming the screen.
+ */
+export function formatCompactCitations(
+  citations: CitationLike[] | undefined,
+  maxDisplay = 5
+): string {
+  if (!citations || !Array.isArray(citations) || citations.length === 0) {
+    return "";
+  }
+
+  // Filter out non-content URLs (avatars, icons, asset templates) and deduplicate
+  const seenUrls = new Set<string>();
+  const validCitations: CitationLike[] = [];
+
+  for (const c of citations) {
+    if (!c.url || typeof c.url !== "string") continue;
+    const url = c.url.trim();
+
+    if (
+      url.includes("avatars.githubusercontent.com") ||
+      url.includes("{?") ||
+      url.includes("?") && url.includes("{") ||
+      url.endsWith(".ico") ||
+      /\.(png|jpe?g|gif|svg|webp)(\?.*)?$/i.test(url)
+    ) {
+      continue;
+    }
+
+    const normKey = url.replace(/\/+$/, "").toLowerCase();
+    if (seenUrls.has(normKey)) continue;
+    seenUrls.add(normKey);
+
+    validCitations.push({ title: c.title || "", url });
+  }
+
+  if (validCitations.length === 0) return "";
+
+  const displayed = validCitations.slice(0, maxDisplay);
+  const remainingCount = validCitations.length - displayed.length;
+
+  const links = displayed.map((c, idx) => {
+    let label = (c.title || "").trim();
+
+    // If title is a raw URL or starts with http, extract a clean domain/path
+    if (!label || label.startsWith("http://") || label.startsWith("https://")) {
+      try {
+        const u = new URL(c.url);
+        const host = u.hostname.replace(/^(api\.|www\.)/, "");
+        const pathSegments = u.pathname.split("/").filter(Boolean);
+        if (pathSegments.length > 2) {
+          label = `${host}/.../${pathSegments[pathSegments.length - 1]}`;
+        } else if (pathSegments.length > 0) {
+          label = `${host}/${pathSegments.join("/")}`;
+        } else {
+          label = host;
+        }
+      } catch {
+        label = c.url;
+      }
+    }
+
+    // Truncate long titles to max 32 chars
+    if (label.length > 32) {
+      label = `${label.slice(0, 29)}...`;
+    }
+
+    const safeLabel = label.replace(/[\[\]]/g, "");
+    return `[${idx + 1}. ${safeLabel}](${c.url})`;
+  });
+
+  let text = `> 🌐 **Sources:** ${links.join(" • ")}`;
+  if (remainingCount > 0) {
+    text += ` *(+${remainingCount} more)*`;
+  }
+
+  return text;
+}
+

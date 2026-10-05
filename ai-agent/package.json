@@ -36,7 +36,8 @@
         { "title": "OpenRouter", "value": "openrouter" },
         { "title": "Google Gemini", "value": "gemini" },
         { "title": "OpenAI", "value": "openai" },
-        { "title": "Ollama / Custom Endpoint", "value": "ollama_custom" }
+        { "title": "Ollama / Custom Endpoint", "value": "ollama_custom" },
+        { "title": "OpenCode CLI (Local)", "value": "opencode" }
       ]
     },
     {

@@ -12,6 +12,7 @@ import {
 } from "@vicinae/api";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { dispatchAgentChat } from "./engine/client.js";
+import { isOpenCodeAvailable } from "./engine/opencode.js";
 import { QuerySwitcher } from "./query-switcher.js";
 import { RenameModal } from "./rename-modal.js";
 import {
@@ -21,6 +22,7 @@ import {
 } from "./storage/history.js";
 import type { Citation, Conversation, Message, Preferences } from "./types.js";
 import {
+  formatCompactCitations,
   formatStreamingTail,
   normalizeMarkdownForVicinae,
 } from "./utils/markdown.js";
@@ -29,11 +31,13 @@ import { getQuerySections } from "./utils/sections.js";
 function ReplyModal(props: {
   conversationTitle: string;
   webSearchEnabled: boolean;
+  provider: string;
   onSubmit: (prompt: string, webSearch: boolean) => void;
 }) {
   const { pop } = useNavigation();
   const [webSearch, setWebSearch] = useState(props.webSearchEnabled);
   const isSubmittingRef = useRef(false);
+  const isOpencode = props.provider === "opencode";
 
   return (
     <Form
@@ -52,7 +56,11 @@ function ReplyModal(props: {
                 setTimeout(() => {
                   props.onSubmit(
                     text,
-                    typeof values.webSearch === "boolean" ? values.webSearch : webSearch
+                    isOpencode
+                      ? false
+                      : typeof values.webSearch === "boolean"
+                        ? values.webSearch
+                        : webSearch
                   );
                 }, 60);
               }
@@ -67,13 +75,20 @@ function ReplyModal(props: {
         placeholder="Type follow-up question or instructions..."
         autoFocus
       />
-      <Form.Checkbox
-        id="webSearch"
-        title="Web Search"
-        label="Enable real-time web search"
-        defaultValue={props.webSearchEnabled}
-        onChange={setWebSearch}
-      />
+      {!isOpencode ? (
+        <Form.Checkbox
+          id="webSearch"
+          title="Web Search"
+          label="Enable real-time web search"
+          defaultValue={props.webSearchEnabled}
+          onChange={setWebSearch}
+        />
+      ) : (
+        <Form.Description
+          title="Web Search"
+          text="OpenCode CLI handles web search and internal tools automatically."
+        />
+      )}
     </Form>
   );
 }
@@ -85,11 +100,15 @@ export function ChatView(props: {
   isPushedFromForm?: boolean;
 }) {
   const prefs = getPreferenceValues<Preferences>();
+  const activeProvider = prefs.provider;
+  const activeModelId = prefs.modelId;
   const { push, pop } = useNavigation();
   const [isLoading, setIsLoading] = useState(false);
   const [showThinking, setShowThinking] = useState(false);
   const [webSearchEnabled, setWebSearchEnabled] = useState(
-    props.initialConversation.enableWebSearch
+    activeProvider === "opencode"
+      ? false
+      : (props.initialWebSearch ?? props.initialConversation.enableWebSearch ?? prefs.enableWebSearch)
   );
   const [conversation, setConversation] = useState<Conversation>(props.initialConversation);
 
@@ -134,26 +153,31 @@ export function ChatView(props: {
     const trimmed = userPrompt.trim();
     if (!trimmed || isLoading) return;
 
-    // Check for API key presence
-    if (conversation.provider === "openrouter" && !prefs.openrouterApiKey) {
+    if (activeProvider === "opencode") {
+      const available = await isOpenCodeAvailable();
+      if (!available) {
+        showToast({
+          style: Toast.Style.Failure,
+          title: "OpenCode CLI Not Found",
+          message: "Please install opencode CLI on your system to use this provider.",
+        });
+        return;
+      }
+    } else if (activeProvider === "openrouter" && !prefs.openrouterApiKey) {
       showToast({
         style: Toast.Style.Failure,
         title: "OpenRouter API Key Missing",
         message: "Please configure your key in extension preferences.",
       });
       return;
-    }
-
-    if (conversation.provider === "gemini" && !prefs.geminiApiKey) {
+    } else if (activeProvider === "gemini" && !prefs.geminiApiKey) {
       showToast({
         style: Toast.Style.Failure,
         title: "Gemini API Key Missing",
         message: "Please configure your key in extension preferences.",
       });
       return;
-    }
-
-    if (conversation.provider === "openai" && !prefs.openaiApiKey) {
+    } else if (activeProvider === "openai" && !prefs.openaiApiKey) {
       showToast({
         style: Toast.Style.Failure,
         title: "OpenAI API Key Missing",
@@ -192,7 +216,9 @@ export function ChatView(props: {
     const updatedConvo: Conversation = {
       ...conversation,
       title: newTitle,
-      enableWebSearch: useWebSearch,
+      provider: activeProvider,
+      modelId: activeModelId,
+      enableWebSearch: activeProvider === "opencode" ? false : useWebSearch,
       messages: newMessages,
       updatedAt: Date.now(),
     };
@@ -206,15 +232,16 @@ export function ChatView(props: {
     const abortController = new AbortController();
     abortControllerRef.current = abortController;
     const citationsCollected: Citation[] = [];
+    let capturedSessionId = conversation.opencodeSessionId;
 
     try {
       await dispatchAgentChat(
         newMessages,
         {
           ...prefs,
-          provider: conversation.provider,
-          modelId: conversation.modelId,
-          enableWebSearch: useWebSearch,
+          provider: activeProvider,
+          modelId: activeModelId,
+          enableWebSearch: activeProvider === "opencode" ? false : useWebSearch,
         },
         (ev) => {
           if (ev.type === "token") {
@@ -235,9 +262,11 @@ export function ChatView(props: {
           } else if (ev.type === "status") {
             dismissStatusToast();
             if (!isStreamingTokensRef.current && isExecutingRef.current) {
+              const safeMsg =
+                ev.message.length > 38 ? `${ev.message.slice(0, 35)}...` : ev.message;
               showToast({
                 style: Toast.Style.Animated,
-                title: ev.message,
+                title: safeMsg,
               }).then((t) => {
                 if (isStreamingTokensRef.current || !isExecutingRef.current) {
                   t.hide();
@@ -260,7 +289,13 @@ export function ChatView(props: {
             dismissStatusToast();
           }
         },
-        abortController.signal
+        abortController.signal,
+        {
+          sessionId: conversation.opencodeSessionId,
+          onSessionId: (id) => {
+            capturedSessionId = id;
+          },
+        }
       );
 
       // Clear pending throttle timeout
@@ -284,6 +319,9 @@ export function ChatView(props: {
 
       const finalConvo: Conversation = {
         ...updatedConvo,
+        provider: activeProvider,
+        modelId: activeModelId,
+        opencodeSessionId: capturedSessionId,
         messages: [...newMessages, assistantMsg],
         updatedAt: Date.now(),
       };
@@ -314,6 +352,9 @@ export function ChatView(props: {
 
         const failedConvo: Conversation = {
           ...updatedConvo,
+          provider: activeProvider,
+          modelId: activeModelId,
+          opencodeSessionId: capturedSessionId,
           messages: [...newMessages, errorMsg],
           updatedAt: Date.now(),
         };
@@ -336,7 +377,7 @@ export function ChatView(props: {
       setIsLoading(false);
       abortControllerRef.current = null;
     }
-  }, [conversation, isLoading, prefs, dismissStatusToast]);
+  }, [conversation, isLoading, prefs, activeProvider, activeModelId, dismissStatusToast]);
 
   // Run initial prompt once when pushed from Form
   useEffect(() => {
@@ -399,6 +440,7 @@ export function ChatView(props: {
       <ReplyModal
         conversationTitle={conversation.title}
         webSearchEnabled={webSearchEnabled}
+        provider={activeProvider}
         onSubmit={(prompt, search) => {
           setWebSearchEnabled(search);
           executeChat(prompt, search);
@@ -481,6 +523,11 @@ export function ChatView(props: {
   const buildMarkdown = useCallback(() => {
     let md = "";
 
+    // Show active provider & model indicator
+    md += `> ⚡ **Model:** ${activeProvider} • \`${activeModelId || "default"}\`${
+      activeProvider !== "opencode" && webSearchEnabled ? " • 🌐 Web Search On" : ""
+    }\n\n`;
+
     // Render clean Navigation Indicator only if multi-turn
     if (sections.length > 1) {
       if (activeQueryIndex === "all") {
@@ -511,11 +558,10 @@ export function ChatView(props: {
         }
         md += `${sec.assistantMessage.content}\n\n`;
         if (sec.assistantMessage.citations && sec.assistantMessage.citations.length > 0) {
-          md += `**Sources:**\n`;
-          sec.assistantMessage.citations.forEach((c, idx) => {
-            md += `[${idx + 1}] [${c.title}](${c.url})\n`;
-          });
-          md += `\n`;
+          const compact = formatCompactCitations(sec.assistantMessage.citations, 5);
+          if (compact) {
+            md += `${compact}\n\n`;
+          }
         }
       }
       if (activeQueryIndex === "all") {
@@ -542,10 +588,10 @@ export function ChatView(props: {
       }
 
       if (streamingCitations.length > 0) {
-        md += `\n\n**Sources:**\n`;
-        streamingCitations.forEach((c, idx) => {
-          md += `[${idx + 1}] [${c.title}](${c.url})\n`;
-        });
+        const compact = formatCompactCitations(streamingCitations, 5);
+        if (compact) {
+          md += `\n\n${compact}`;
+        }
       }
     }
 
@@ -553,6 +599,9 @@ export function ChatView(props: {
     return normalizeMarkdownForVicinae(md);
   }, [
     activeQueryIndex,
+    activeProvider,
+    activeModelId,
+    webSearchEnabled,
     sections,
     isLoading,
     showThinking,
@@ -678,18 +727,20 @@ export function ChatView(props: {
             shortcut={{ modifiers: ["cmd", "shift"], key: "r" }}
             onAction={openRenameModal}
           />
-          <Action
-            title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
-            icon={Icon.Globe01}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
-            onAction={() => {
-              setWebSearchEnabled(!webSearchEnabled);
-              showToast({
-                style: Toast.Style.Success,
-                title: !webSearchEnabled ? "Web Search Enabled" : "Web Search Disabled",
-              });
-            }}
-          />
+          {activeProvider !== "opencode" && (
+            <Action
+              title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
+              icon={Icon.Globe01}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
+              onAction={() => {
+                setWebSearchEnabled(!webSearchEnabled);
+                showToast({
+                  style: Toast.Style.Success,
+                  title: !webSearchEnabled ? "Web Search Enabled" : "Web Search Disabled",
+                });
+              }}
+            />
+          )}
           <Action
             title="Start New Conversation"
             icon={Icon.PlusCircle}
@@ -714,9 +765,11 @@ export function ChatView(props: {
 
 export function PromptForm(props: {
   initialWebSearch: boolean;
+  provider?: string;
   onSubmit: (prompt: string, webSearch: boolean) => void;
 }) {
   const [webSearchEnabled, setWebSearchEnabled] = useState(props.initialWebSearch);
+  const isOpencode = props.provider === "opencode";
 
   return (
     <Form
@@ -728,26 +781,31 @@ export function PromptForm(props: {
             icon={Icon.SpeechBubble}
             onSubmit={(values: Form.Values) => {
               const text = String(values.prompt || "").trim();
-              const search =
-                typeof values.webSearch === "boolean" ? values.webSearch : webSearchEnabled;
+              const search = isOpencode
+                ? false
+                : typeof values.webSearch === "boolean"
+                  ? values.webSearch
+                  : webSearchEnabled;
               if (text) {
                 setWebSearchEnabled(search);
                 props.onSubmit(text, search);
               }
             }}
           />
-          <Action
-            title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
-            icon={Icon.Globe01}
-            shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
-            onAction={() => {
-              setWebSearchEnabled(!webSearchEnabled);
-              showToast({
-                style: Toast.Style.Success,
-                title: !webSearchEnabled ? "Web Search Enabled" : "Web Search Disabled",
-              });
-            }}
-          />
+          {!isOpencode && (
+            <Action
+              title={`Toggle Web Search (${webSearchEnabled ? "Disable" : "Enable"})`}
+              icon={Icon.Globe01}
+              shortcut={{ modifiers: ["cmd", "shift"], key: "w" }}
+              onAction={() => {
+                setWebSearchEnabled(!webSearchEnabled);
+                showToast({
+                  style: Toast.Style.Success,
+                  title: !webSearchEnabled ? "Web Search Enabled" : "Web Search Disabled",
+                });
+              }}
+            />
+          )}
           <Action
             title="Open Extension Preferences"
             icon={Icon.Cog}
@@ -759,16 +817,27 @@ export function PromptForm(props: {
       <Form.TextArea
         id="prompt"
         title="Prompt"
-        placeholder="Ask AI agent anything (Web search enabled)..."
+        placeholder={
+          isOpencode
+            ? "Ask OpenCode CLI anything..."
+            : "Ask AI agent anything (Web search enabled)..."
+        }
         autoFocus
       />
-      <Form.Checkbox
-        id="webSearch"
-        title="Web Search"
-        label="Enable real-time web search and page reading"
-        defaultValue={webSearchEnabled}
-        onChange={setWebSearchEnabled}
-      />
+      {!isOpencode ? (
+        <Form.Checkbox
+          id="webSearch"
+          title="Web Search"
+          label="Enable real-time web search and page reading"
+          defaultValue={webSearchEnabled}
+          onChange={setWebSearchEnabled}
+        />
+      ) : (
+        <Form.Description
+          title="Web Search"
+          text="OpenCode CLI manages web search and internal tools automatically."
+        />
+      )}
     </Form>
   );
 }
@@ -790,7 +859,7 @@ export default function Command(props?: { conversation?: Conversation }) {
       title: "New Conversation",
       provider: prefs.provider,
       modelId: prefs.modelId,
-      enableWebSearch: search,
+      enableWebSearch: prefs.provider === "opencode" ? false : search,
       systemPrompt: prefs.systemPrompt || "",
       messages: [],
       createdAt: Date.now(),
@@ -801,7 +870,7 @@ export default function Command(props?: { conversation?: Conversation }) {
       <ChatView
         initialConversation={freshConvo}
         initialPrompt={text}
-        initialWebSearch={search}
+        initialWebSearch={prefs.provider === "opencode" ? false : search}
         isPushedFromForm={true}
       />
     );
@@ -809,7 +878,14 @@ export default function Command(props?: { conversation?: Conversation }) {
 
   return (
     <PromptForm
-      initialWebSearch={props?.conversation ? props.conversation.enableWebSearch : prefs.enableWebSearch}
+      initialWebSearch={
+        prefs.provider === "opencode"
+          ? false
+          : props?.conversation
+            ? props.conversation.enableWebSearch
+            : prefs.enableWebSearch
+      }
+      provider={prefs.provider}
       onSubmit={handleSubmitInitialPrompt}
     />
   );
